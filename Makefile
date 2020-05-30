@@ -1,0 +1,34 @@
+CC=cc
+FLAGS=-g -O0 -Isrc -Wall -Wextra -std=c++11 -Isrc -Isrc/dlmalloc \
+	  -I$(ARROW_HOME)/include -DMSPACES=1 -DONLY_MSPACES=1 \
+	  -DHAVE_MORECORE=0 -DHAVE_MMAP=0 -DHAVE_MREMAP=0 -DUSE_LOCKS=0 \
+	  -DFOOTERS=1
+LINK_FLAGS=-lshmem_ml -larrow -Lbin -L$(ARROW_HOME)/lib64
+
+bin/libshmem_ml.a: bin/dlmalloc.o bin/shmem_ml.o bin/ShmemMemoryPool.o
+	ar rcs $@ $^
+
+bin/dlmalloc.o: src/dlmalloc/dlmalloc.c
+	$(CC) $(FLAGS) -fPIC -c -o $@ $^
+
+bin/shmem_ml.o: src/shmem_ml.cpp
+	$(CC) $(FLAGS) -fPIC -c -o $@ $^
+
+bin/ShmemMemoryPool.o: src/ShmemMemoryPool.cpp
+	$(CC) $(FLAGS) -fPIC -c -o $@ $^
+
+bin/bfs: example/bfs.cpp \
+		 example/graph500-graph500-3.0.0/generator/splittable_mrg.c \
+		 example/graph500-graph500-3.0.0/generator/graph_generator.c \
+		 bin/libshmem_ml.a
+	$(CC) $(FLAGS) -o $@ example/bfs.cpp \
+		 example/graph500-graph500-3.0.0/generator/splittable_mrg.c \
+		 example/graph500-graph500-3.0.0/generator/graph_generator.c \
+		 example/graph500-graph500-3.0.0/generator/utils.c \
+		 -Iexample/graph500-graph500-3.0.0 $(LINK_FLAGS)
+
+bin/save_load_get_set: test/save_load_get_set.cpp bin/libshmem_ml.a
+	$(CC) $(FLAGS) -o $@ test/save_load_get_set.cpp $(LINK_FLAGS)
+
+clean:
+	rm -f bin/*.o bin/*.a
