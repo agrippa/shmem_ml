@@ -25,6 +25,7 @@ bin/bfs: example/bfs.cpp \
 		 example/graph500-graph500-3.0.0/generator/splittable_mrg.c \
 		 example/graph500-graph500-3.0.0/generator/graph_generator.c \
 		 example/graph500-graph500-3.0.0/generator/utils.c \
+		 example/graph500-graph500-3.0.0/generator/make_graph.c \
 		 -Iexample/graph500-graph500-3.0.0 $(LINK_FLAGS)
 
 bin/save_load_get_set: test/save_load_get_set.cpp bin/libshmem_ml.a

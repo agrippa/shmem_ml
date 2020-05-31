@@ -46,7 +46,7 @@ static const int ulong_bits = sizeof(unsigned long) * CHAR_BIT;
 typedef struct tuple_graph {
 	int data_in_file; /* 1 for file, 0 for memory */
 	int write_file; /* 1 if the file needs written, 0 if re-used and read */
-	packed_edge* restrict edgememory; /* NULL if edges are in file */
+	packed_edge* edgememory; /* NULL if edges are in file */
 	int64_t edgememory_size;
 	int64_t max_edgememory_size;
 	MPI_File edgefile; /* Or MPI_FILE_NULL if edges are in memory */
