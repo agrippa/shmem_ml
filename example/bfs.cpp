@@ -94,11 +94,24 @@ int main(int argc, char **argv) {
         ShmemML1D<int64_t> *verts = new ShmemML1D<int64_t>(nvertices, INT64_MAX);
         assert(verts);
 
+        /*
+         * From Graph500 spec:
+         *   The graph generator creates a small number of multiple edges
+         *   between two vertices as well as self-loops. Multiple edges,
+         *   self-loops, and isolated vertices may be ignored in the subsequent
+         *   kernels but must be included in the edge list provided to the first
+         *   kernel.
+         * We remove self loops here, and trim duplicate edges below.
+         */
+
         ShmemML1D<long long> edges_per_pe(npes, (long long)0);
         for (int64_t i = 0; i < end_edge_index - start_edge_index; i++) {
             packed_edge curr = edges.get_local(i);
             int64_t v0 = get_v0_from_edge(&curr);
             int64_t v1 = get_v1_from_edge(&curr);
+
+            if (v0 == v1) continue;
+
             int v0_pe = verts->owning_pe(v0);
             int v1_pe = verts->owning_pe(v1);
             edges_per_pe.atomic_add(v0_pe, 1);
@@ -117,6 +130,8 @@ int main(int argc, char **argv) {
             packed_edge curr = edges.get_local(i);
             int64_t v0 = get_v0_from_edge(&curr);
             int64_t v1 = get_v1_from_edge(&curr);
+            if (v0 == v1) continue;
+
             int v0_pe = verts->owning_pe(v0);
             int v1_pe = verts->owning_pe(v1);
 
@@ -165,6 +180,7 @@ int main(int argc, char **argv) {
         memset(neighbors_per_vertex, 0x00,
                 n_local_verts * sizeof(*neighbors_per_vertex));
 
+        // TODO delete duplicate edges
         int64_t* neighbor_lists = (int64_t *)malloc(
                 neighbor_lists_len * sizeof(*neighbor_lists));
         assert(neighbor_lists);
@@ -213,23 +229,25 @@ int main(int argc, char **argv) {
             int any_changes;
             int iter = 0;
             do {
-                changes.set_local(0, 0);
+                unsigned nchanges = 0;
                 for (int64_t i = 0; i < n_local_verts; i++) {
                     if (verts->get_local(i) < 0) {
                         int64_t parent = (-verts->get_local(i)) - 1;
-                        int64_t *vert_neighbor_list = neighbor_lists + neighbor_list_offsets[i];
-                        int64_t vert_neighbor_list_len = neighbor_list_offsets[i + 1] - neighbor_list_offsets[i];
+                        int64_t *vert_neighbor_list = neighbor_lists +
+                            neighbor_list_offsets[i];
+                        int64_t vert_neighbor_list_len =
+                            neighbor_list_offsets[i + 1] -
+                            neighbor_list_offsets[i];
                         for (int j = 0; j < vert_neighbor_list_len; j++) {
                             int64_t found_val = verts->atomic_cas(
                                     vert_neighbor_list[j], INT64_MAX,
                                     -(verts->local_slice_start() + i + 1));
-                            if (found_val == INT64_MAX) {
-                                changes.set_local(0, changes.get_local(0) + 1);
-                            }
+                            nchanges += (found_val == INT64_MAX);
                         }
                         verts->set_local(i, parent);
                     }
                 }
+                changes.set_local(0, nchanges);
                 long long n_global_changes = changes.sum(0);
                 if (pe == 0) {
                     printf("Root %d (%ld) iter %d changes %ld\n", root_index,
@@ -239,9 +257,11 @@ int main(int argc, char **argv) {
                 iter++;
             } while(any_changes);
 
-            unsigned long long elapsed_time_us = shmem_ml_current_time_us() - start_time_us;
+            unsigned long long elapsed_time_us = shmem_ml_current_time_us() -
+                start_time_us;
             if (pe == 0) {
-                printf("Completed root %d in %f s\n", root_index, elapsed_time_us / 1000000.0);
+                printf("Completed root %d in %f s\n", root_index,
+                        elapsed_time_us / 1000000.0);
             }
 
             delete verts;

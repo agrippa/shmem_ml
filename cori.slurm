@@ -1,7 +1,7 @@
 #!/bin/bash -l
 
 #SBATCH -p debug
-#SBATCH -N 8
+#SBATCH -N 2
 #SBATCH -C haswell
 #SBATCH -t 00:05:00
 #SBATCH -J SHMEM_ML
@@ -25,6 +25,7 @@ export CORES_PER_SOCKET=16
 export SOCKETS_PER_NODE=2
 export CORES_PER_NODE=$(($SOCKETS_PER_NODE * $CORES_PER_SOCKET))
 export SHMEM_SYMMETRIC_SIZE=$((2 * 1024 * 1024 * 1024))
+export SHMEM_ML_POOL_SIZE=$((1024 * 1024 * 1024))
 
 cd $HOME/shmem_ml
 make clean
@@ -41,6 +42,6 @@ echo
 # srun $SLURM_ARGS $HOME/shmem_ml/bin/save_load_get_set
 # echo
 echo "bfs"
-srun $SLURM_ARGS $HOME/shmem_ml/bin/bfs $SCRATCH/job.$SLURM_JOB_ID/edges.bin 10 17
+srun $SLURM_ARGS $HOME/shmem_ml/bin/bfs $SCRATCH/job.$SLURM_JOB_ID/edges.bin 5 19
 echo
 
