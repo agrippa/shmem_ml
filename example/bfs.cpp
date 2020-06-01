@@ -9,7 +9,8 @@
 #include <generator/graph_generator.h>
 #include <generator/utils.h>
 
-static int is_isolated = 0;
+static int *is_isolated = NULL;
+static long *psync = NULL;
 
 int64_t* compute_bfs_roots(int &num_bfs_roots, int64_t nglobalverts,
         ShmemML1D<int64_t>* verts, int64_t *neighbor_list_offsets) {
@@ -22,6 +23,7 @@ int64_t* compute_bfs_roots(int &num_bfs_roots, int64_t nglobalverts,
 
     uint64_t counter = 0;
     int bfs_root_idx;
+    unsigned ntries = 0;
     for (bfs_root_idx = 0; bfs_root_idx < num_bfs_roots; ++bfs_root_idx) {
         int64_t root;
         while (1) {
@@ -40,29 +42,31 @@ int64_t* compute_bfs_roots(int &num_bfs_roots, int64_t nglobalverts,
             }
             if (is_duplicate) continue; /* Everyone takes the same path here */
 
-            shmem_barrier_all();
-
             int owning_pe = verts->owning_pe(root);
             if (owning_pe == shmem_my_pe()) {
                 int64_t local_vert_offset = root - verts->local_slice_start();
                 int64_t list_len = neighbor_list_offsets[local_vert_offset + 1] -
                     neighbor_list_offsets[local_vert_offset];
-                int local_is_isolated = (list_len == 0);
-
-                for (int p = 0; p < shmem_n_pes(); p++) {
-                    shmem_int_p(&is_isolated, local_is_isolated, p);
-                }
+                *is_isolated = (list_len == 0);
             }
 
             shmem_barrier_all();
+            shmem_broadcast32(is_isolated, is_isolated, 1, owning_pe, 0, 0, shmem_n_pes(), psync);
+            shmem_barrier_all();
 
-            int local_is_isolated = shmem_int_g(&is_isolated, shmem_my_pe());
+            int local_is_isolated = *is_isolated;
 
             if (!local_is_isolated) break;
+
+            ntries++;
         }
         bfs_roots[bfs_root_idx] = root;
     }
     num_bfs_roots = bfs_root_idx;
+    if (shmem_my_pe() == 0) {
+        fprintf(stderr, "Took %u tries to generate %d roots\n", shmem_my_pe(), ntries,
+                num_bfs_roots);
+    }
     return bfs_roots;
 }
 
@@ -76,8 +80,17 @@ int main(int argc, char **argv) {
     shmem_init();
     int pe = shmem_my_pe();
     int npes = shmem_n_pes();
+    is_isolated = (int*)shmem_malloc(sizeof(*is_isolated));
+    assert(is_isolated);
+    psync = (long *)shmem_malloc(SHMEM_BCAST_SYNC_SIZE * sizeof(*psync));
+    assert(psync);
+    for (int i = 0; i < SHMEM_BCAST_SYNC_SIZE; i++) {
+        psync[i] = SHMEM_SYNC_VALUE;
+    }
 
     {
+        unsigned long long start_setup = shmem_ml_current_time_us();
+
         int SCALE = atoi(argv[3]);
         int64_t edgefactor = 16; // edges per vertex
         int64_t nvertices = (int64_t)(1) << SCALE;
@@ -96,6 +109,13 @@ int main(int argc, char **argv) {
 
         ShmemML1D<int64_t> *verts = new ShmemML1D<int64_t>(nvertices, INT64_MAX);
         assert(verts);
+        int64_t n_local_verts = verts->local_slice_end() -
+            verts->local_slice_start();
+        if (pe == 0) {
+            fprintf(stderr, "Running with scale=%d # global verts=%ld # global "
+                    "edges=%ld # verts per PE=%ld # PEs=%d\n", SCALE, nvertices, nedges,
+                    n_local_verts, npes);
+        }
 
         /*
          * From Graph500 spec:
@@ -147,9 +167,12 @@ int main(int argc, char **argv) {
             }
         }
         partitioned_edges.sync();
+        unsigned long long done_partitioning = shmem_ml_current_time_us();
+        if (pe == 0) {
+            fprintf(stderr, "Partitioning edges across PEs took %f s\n",
+                    (done_partitioning - start_setup) / 1000000.0);
+        }
 
-        int64_t n_local_verts = verts->local_slice_end() -
-            verts->local_slice_start();
         int64_t* neighbors_per_vertex = (int64_t *)malloc(
                 n_local_verts * sizeof(*neighbors_per_vertex));
         assert(neighbors_per_vertex);
@@ -183,7 +206,6 @@ int main(int argc, char **argv) {
         memset(neighbors_per_vertex, 0x00,
                 n_local_verts * sizeof(*neighbors_per_vertex));
 
-        // TODO delete duplicate edges
         int64_t* neighbor_lists = (int64_t *)malloc(
                 neighbor_lists_len * sizeof(*neighbor_lists));
         assert(neighbor_lists);
@@ -206,47 +228,52 @@ int main(int argc, char **argv) {
                 neighbors_per_vertex[local_v1_offset]++;
             }
         }
+        shmem_barrier_all();
+        unsigned long long done_neighbors_lists = shmem_ml_current_time_us();
+        if (pe == 0) {
+            fprintf(stderr, "Constructing neighbors lists took %f s\n",
+                    (done_neighbors_lists - done_partitioning) / 1000000.0);
+        }
 
         /*
          * Find and remove duplicates in neighbor lists. This is a pretty
          * inefficient way to do this at the moment.
          */
         int64_t count_duplicates = 0;
+        int64_t index = 0;
         for (int64_t i = 0; i < n_local_verts; i++) {
             int64_t *vert_neighbor_list = neighbor_lists +
                 neighbor_list_offsets[i];
             int64_t vert_neighbor_list_len = neighbor_list_offsets[i + 1] -
                 neighbor_list_offsets[i];
-            for (int j = vert_neighbor_list_len - 1; j > 0; j--) {
+
+            int64_t new_neighbor_list_offset = index;
+
+            for (int j = 0; j < vert_neighbor_list_len; j++) {
+                int64_t curr_neigh = vert_neighbor_list[j];
                 int duplicated = 0;
-                for (int k = j - 1; k >= 0; k--) {
-                    if (vert_neighbor_list[j] == vert_neighbor_list[k]) {
+                for (int k = 0; k < j; k++) {
+                    if (neighbor_lists[new_neighbor_list_offset + k] == curr_neigh) {
                         duplicated = 1;
+                        break;
                     }
                 }
 
-                if (duplicated) {
-                    vert_neighbor_list[j] = vert_neighbor_list[vert_neighbor_list_len - 1];
-                    vert_neighbor_list_len--;
+                if (!duplicated) {
+                    neighbor_lists[index++] = curr_neigh;
+                } else {
                     count_duplicates++;
                 }
             }
-            int64_t old_vert_neighbor_list_len = neighbor_list_offsets[i + 1] -
-                neighbor_list_offsets[i];
-            int64_t delta = old_vert_neighbor_list_len - vert_neighbor_list_len;
-            if (delta > 0) {
-                /*
-                 * Shift all neighbor lists and neighbor list offsets down by
-                 * the difference
-                 */
-                int64_t next_offset = neighbor_list_offsets[i + 1];
-                for (int64_t j = next_offset; j < neighbor_list_offsets[n_local_verts]; j++) {
-                    neighbor_lists[j - delta] = neighbor_lists[j];
-                }
-                for (int64_t j = i + 1; j <= n_local_verts; j++) {
-                    neighbor_list_offsets[j] -= delta;
-                }
-            }
+
+            neighbor_list_offsets[i] = new_neighbor_list_offset;
+        }
+        neighbor_list_offsets[n_local_verts] = index;
+        shmem_barrier_all();
+        unsigned long long done_deduplicating = shmem_ml_current_time_us();
+        if (pe == 0) {
+            fprintf(stderr, "Deduplicating took %f s\n",
+                    (done_deduplicating - done_neighbors_lists) / 1000000.0);
         }
 
         // printf("PE %d deleted %ld duplicate edges out of %ld total local "
@@ -265,6 +292,15 @@ int main(int argc, char **argv) {
                 neighbor_list_offsets);
 
         ShmemML1D<long long> changes(npes);
+
+        unsigned long long done_roots = shmem_ml_current_time_us();
+
+        if (pe == 0) {
+            fprintf(stderr, "Generating roots took %f s\n",
+                    (done_roots - done_deduplicating) / 1000000.0);
+            fprintf(stderr, "Setup took %f s, scale=%d # roots=%d\n",
+                    (done_roots - start_setup) / 1000000.0, SCALE, num_bfs_roots);
+        }
 
         for (int root_index = 0; root_index < num_bfs_roots; root_index++) {
             unsigned long long start_time_us = shmem_ml_current_time_us();

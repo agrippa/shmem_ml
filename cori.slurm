@@ -1,9 +1,9 @@
 #!/bin/bash -l
 
 #SBATCH -p debug
-#SBATCH -N 2
+#SBATCH -N 16
 #SBATCH -C haswell
-#SBATCH -t 00:05:00
+#SBATCH -t 00:20:00
 #SBATCH -J SHMEM_ML
 #SBATCH --exclusive
 ###SBATCH --contiguous
@@ -37,6 +37,6 @@ echo
 # srun $SLURM_ARGS $HOME/shmem_ml/bin/save_load_get_set
 # echo
 echo "bfs"
-srun $SLURM_ARGS $HOME/shmem_ml/bin/bfs $SCRATCH/job.$SLURM_JOB_ID/edges.bin 5 21
+srun $SLURM_ARGS $HOME/shmem_ml/bin/bfs $SCRATCH/job.$SLURM_JOB_ID/edges.bin 1 26
 echo
 
