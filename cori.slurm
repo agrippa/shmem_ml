@@ -27,13 +27,8 @@ export CORES_PER_NODE=$(($SOCKETS_PER_NODE * $CORES_PER_SOCKET))
 export SHMEM_SYMMETRIC_SIZE=$((2 * 1024 * 1024 * 1024))
 export SHMEM_ML_POOL_SIZE=$((1024 * 1024 * 1024))
 
-cd $HOME/shmem_ml
-make clean
-make -j bin/save_load_get_set bin/bfs
-
-cd $SCRATCH
-mkdir -p job.$SLURM_JOB_ID
-cd job.$SLURM_JOB_ID
+mkdir -p $SCRATCH/job.$SLURM_JOB_ID
+cd $SCRATCH/job.$SLURM_JOB_ID
 
 export SLURM_ARGS="--ntasks=$(($SLURM_NNODES * $CORES_PER_NODE)) --ntasks-per-socket=$CORES_PER_SOCKET --cpus-per-task=1"
 

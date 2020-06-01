@@ -205,6 +205,51 @@ int main(int argc, char **argv) {
         }
 
         /*
+         * Find and remove duplicates in neighbor lists. This is a pretty
+         * inefficient way to do this at the moment.
+         */
+        int64_t count_duplicates = 0;
+        for (int64_t i = 0; i < n_local_verts; i++) {
+            int64_t *vert_neighbor_list = neighbor_lists +
+                neighbor_list_offsets[i];
+            int64_t vert_neighbor_list_len = neighbor_list_offsets[i + 1] -
+                neighbor_list_offsets[i];
+            for (int j = vert_neighbor_list_len - 1; j > 0; j--) {
+                int duplicated = 0;
+                for (int k = j - 1; k >= 0; k--) {
+                    if (vert_neighbor_list[j] == vert_neighbor_list[k]) {
+                        duplicated = 1;
+                    }
+                }
+
+                if (duplicated) {
+                    vert_neighbor_list[j] = vert_neighbor_list[vert_neighbor_list_len - 1];
+                    vert_neighbor_list_len--;
+                    count_duplicates++;
+                }
+            }
+            int64_t old_vert_neighbor_list_len = neighbor_list_offsets[i + 1] -
+                neighbor_list_offsets[i];
+            int64_t delta = old_vert_neighbor_list_len - vert_neighbor_list_len;
+            if (delta > 0) {
+                /*
+                 * Shift all neighbor lists and neighbor list offsets down by
+                 * the difference
+                 */
+                int64_t next_offset = neighbor_list_offsets[i + 1];
+                for (int64_t j = next_offset; j < neighbor_list_offsets[n_local_verts]; j++) {
+                    neighbor_lists[j - delta] = neighbor_lists[j];
+                }
+                for (int64_t j = i + 1; j <= n_local_verts; j++) {
+                    neighbor_list_offsets[j] -= delta;
+                }
+            }
+        }
+        // printf("PE %d deleted %ld duplicate edges out of %ld total local "
+        //         "edges (%f%%)\n", pe, count_duplicates, neighbor_lists_len,
+        //         100.0 * count_duplicates / neighbor_lists_len);
+
+        /*
          * neighbor_lists stores each local vertex's neighbor list in a
          * contiguous 1D array. neighbor_list_offsets[V] stores the offset of
          * the neighbor list for local vertex V in neighbor_lists. The length of
