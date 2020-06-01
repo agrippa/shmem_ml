@@ -40,22 +40,25 @@ int64_t* compute_bfs_roots(int &num_bfs_roots, int64_t nglobalverts,
             }
             if (is_duplicate) continue; /* Everyone takes the same path here */
 
+            shmem_barrier_all();
+
             int owning_pe = verts->owning_pe(root);
             if (owning_pe == shmem_my_pe()) {
                 int64_t local_vert_offset = root - verts->local_slice_start();
                 int64_t list_len = neighbor_list_offsets[local_vert_offset + 1] -
                     neighbor_list_offsets[local_vert_offset];
-                is_isolated = (list_len == 0);
+                int local_is_isolated = (list_len == 0);
 
                 for (int p = 0; p < shmem_n_pes(); p++) {
-                    if (p == shmem_my_pe()) continue;
-                    shmem_int_p(&is_isolated, is_isolated, p);
+                    shmem_int_p(&is_isolated, local_is_isolated, p);
                 }
             }
 
             shmem_barrier_all();
 
-            if (is_isolated) continue;
+            int local_is_isolated = shmem_int_g(&is_isolated, shmem_my_pe());
+
+            if (!local_is_isolated) break;
         }
         bfs_roots[bfs_root_idx] = root;
     }
@@ -245,6 +248,7 @@ int main(int argc, char **argv) {
                 }
             }
         }
+
         // printf("PE %d deleted %ld duplicate edges out of %ld total local "
         //         "edges (%f%%)\n", pe, count_duplicates, neighbor_lists_len,
         //         100.0 * count_duplicates / neighbor_lists_len);
