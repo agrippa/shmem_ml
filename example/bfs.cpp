@@ -9,8 +9,55 @@
 #include <generator/graph_generator.h>
 #include <generator/utils.h>
 
+#include <cstdlib>
+
 static int *is_isolated = NULL;
 static long *psync = NULL;
+
+#define BITS_PER_BYTE 8
+#define BITS_PER_INT (sizeof(unsigned) * BITS_PER_BYTE)
+
+class bitvector {
+    public:
+        bitvector(int64_t nglobalverts) {
+            const size_t visited_ints = ((nglobalverts + BITS_PER_INT - 1) /
+                    BITS_PER_INT);
+            visited_bytes = visited_ints * sizeof(unsigned);
+            visited = (unsigned *)malloc(visited_bytes);
+            assert(visited);
+        }
+
+        void clear() {
+            memset(visited, 0x00, visited_bytes);
+        }
+
+        inline int is_set(const uint64_t global_vertex_id) {
+            const unsigned word_index = global_vertex_id / BITS_PER_INT;
+            const int bit_index = global_vertex_id % BITS_PER_INT;
+            const int mask = (1 << bit_index);
+
+            return (((visited[word_index] & mask) > 0) ? 1 : 0);
+        }
+
+        inline void set(const uint64_t global_vertex_id) {
+            const int word_index = global_vertex_id / BITS_PER_INT;
+            const int bit_index = global_vertex_id % BITS_PER_INT;
+            const int mask = (1 << bit_index);
+
+            visited[word_index] |= mask;
+        }
+
+    private:
+        unsigned *visited;
+        int64_t visited_bytes;
+};
+
+
+int compar(const void* a,const void* b) {
+    const int64_t *pa = (const int64_t *)a;
+    const int64_t *pb = (const int64_t *)b;
+    return *pa - *pb;
+}
 
 int64_t* compute_bfs_roots(int &num_bfs_roots, int64_t nglobalverts,
         ShmemML1D<int64_t>* verts, int64_t *neighbor_list_offsets) {
@@ -64,7 +111,7 @@ int64_t* compute_bfs_roots(int &num_bfs_roots, int64_t nglobalverts,
     }
     num_bfs_roots = bfs_root_idx;
     if (shmem_my_pe() == 0) {
-        fprintf(stderr, "Took %u tries to generate %d roots\n", shmem_my_pe(), ntries,
+        fprintf(stderr, "Took %u tries to generate %d roots\n", ntries,
                 num_bfs_roots);
     }
     return bfs_roots;
@@ -247,22 +294,16 @@ int main(int argc, char **argv) {
             int64_t vert_neighbor_list_len = neighbor_list_offsets[i + 1] -
                 neighbor_list_offsets[i];
 
+            qsort(vert_neighbor_list, vert_neighbor_list_len,
+                    sizeof(*vert_neighbor_list), compar);
+
             int64_t new_neighbor_list_offset = index;
-
-            for (int j = 0; j < vert_neighbor_list_len; j++) {
-                int64_t curr_neigh = vert_neighbor_list[j];
-                int duplicated = 0;
-                for (int k = 0; k < j; k++) {
-                    if (neighbor_lists[new_neighbor_list_offset + k] == curr_neigh) {
-                        duplicated = 1;
-                        break;
+            if (vert_neighbor_list_len > 0) {
+                neighbor_lists[index++] = vert_neighbor_list[0];
+                for (int i = 1; i < vert_neighbor_list_len; i++) {
+                    if (vert_neighbor_list[i] != neighbor_lists[index - 1]) {
+                        neighbor_lists[index++] = vert_neighbor_list[i];
                     }
-                }
-
-                if (!duplicated) {
-                    neighbor_lists[index++] = curr_neigh;
-                } else {
-                    count_duplicates++;
                 }
             }
 
@@ -302,6 +343,9 @@ int main(int argc, char **argv) {
                     (done_roots - start_setup) / 1000000.0, SCALE, num_bfs_roots);
         }
 
+        bitvector *visited = new bitvector(nvertices);
+        assert(visited);
+
         for (int root_index = 0; root_index < num_bfs_roots; root_index++) {
             unsigned long long start_time_us = shmem_ml_current_time_us();
 
@@ -310,6 +354,7 @@ int main(int argc, char **argv) {
             if (root_pe == pe) {
                 verts->set(root, -(root + 1));
             }
+            visited->set(root);
 
             int any_changes;
             int iter = 0;
@@ -323,13 +368,19 @@ int main(int argc, char **argv) {
                         int64_t vert_neighbor_list_len =
                             neighbor_list_offsets[i + 1] -
                             neighbor_list_offsets[i];
+
                         for (int j = 0; j < vert_neighbor_list_len; j++) {
-                            int64_t found_val = verts->atomic_cas(
-                                    vert_neighbor_list[j], INT64_MAX,
-                                    -(verts->local_slice_start() + i + 1));
-                            nchanges += (found_val == INT64_MAX);
+                            int64_t neighbor = vert_neighbor_list[j];
+                            if (!visited->is_set(neighbor)) {
+                                int64_t found_val = verts->atomic_cas(
+                                        neighbor, INT64_MAX,
+                                        -(verts->local_slice_start() + i + 1));
+                                nchanges += (found_val == INT64_MAX);
+                                visited->set(neighbor);
+                            }
                         }
                         verts->set_local(i, parent);
+                        visited->set(verts->local_slice_start() + i);
                     }
                 }
                 changes.set_local(0, nchanges);
@@ -353,6 +404,7 @@ int main(int argc, char **argv) {
             ShmemML1D<int64_t> *verts = new ShmemML1D<int64_t>(nvertices,
                     INT64_MAX);
             assert(verts);
+            visited->clear();
         }
 
         edges.save(argv[1]);
