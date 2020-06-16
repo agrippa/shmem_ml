@@ -25,6 +25,7 @@ class bitvector {
             visited_bytes = visited_ints * sizeof(unsigned);
             visited = (unsigned *)malloc(visited_bytes);
             assert(visited);
+            memset(visited, 0x00, visited_bytes);
         }
 
         void clear() {
@@ -34,7 +35,7 @@ class bitvector {
         inline int is_set(const uint64_t global_vertex_id) {
             const unsigned word_index = global_vertex_id / BITS_PER_INT;
             const int bit_index = global_vertex_id % BITS_PER_INT;
-            const int mask = (1 << bit_index);
+            const unsigned mask = ((unsigned)1 << bit_index);
 
             return (((visited[word_index] & mask) > 0) ? 1 : 0);
         }
@@ -42,7 +43,7 @@ class bitvector {
         inline void set(const uint64_t global_vertex_id) {
             const int word_index = global_vertex_id / BITS_PER_INT;
             const int bit_index = global_vertex_id % BITS_PER_INT;
-            const int mask = (1 << bit_index);
+            const unsigned mask = ((unsigned)1 << bit_index);
 
             visited[word_index] |= mask;
         }
@@ -54,9 +55,9 @@ class bitvector {
 
 
 int compar(const void* a,const void* b) {
-    const int64_t *pa = (const int64_t *)a;
-    const int64_t *pb = (const int64_t *)b;
-    return *pa - *pb;
+    const int64_t pa = *((const int64_t *)a);
+    const int64_t pb = *((const int64_t *)b);
+    return (pa > pb) ? 1 : ((pa < pb) ? -1 : 0);
 }
 
 int64_t* compute_bfs_roots(int &num_bfs_roots, int64_t nglobalverts,
@@ -175,12 +176,11 @@ int main(int argc, char **argv) {
          */
 
         ShmemML1D<long long> edges_per_pe(npes, (long long)0);
-        for (int64_t i = 0; i < end_edge_index - start_edge_index; i++) {
-            packed_edge curr = edges.get_local(i);
+        edges.apply_ip([verts, &edges_per_pe] (int64_t global_index, int64_t local_index, packed_edge curr) {
             int64_t v0 = get_v0_from_edge(&curr);
             int64_t v1 = get_v1_from_edge(&curr);
 
-            if (v0 == v1) continue;
+            if (v0 == v1) return;
 
             int v0_pe = verts->owning_pe(v0);
             int v1_pe = verts->owning_pe(v1);
@@ -188,7 +188,7 @@ int main(int argc, char **argv) {
             if (v1_pe != v0_pe) {
                 edges_per_pe.atomic_add(v1_pe, 1);
             }
-        }
+        });
 
         edges_per_pe.sync();
 
@@ -196,23 +196,22 @@ int main(int argc, char **argv) {
 
         ShmemML1D<packed_edge> partitioned_edges(max_edges_per_pe * npes);
         ShmemML1D<int64_t> partitioned_edges_counter(npes, 0);
-        for (int64_t i = 0; i < end_edge_index - start_edge_index; i++) {
-            packed_edge curr = edges.get_local(i);
+        edges.apply_ip([verts, &partitioned_edges_counter, &partitioned_edges, &edges] (int64_t global_index, int64_t local_index, packed_edge curr) {
             int64_t v0 = get_v0_from_edge(&curr);
             int64_t v1 = get_v1_from_edge(&curr);
-            if (v0 == v1) continue;
+            if (v0 == v1) return;
 
             int v0_pe = verts->owning_pe(v0);
             int v1_pe = verts->owning_pe(v1);
 
             long long index0 = partitioned_edges_counter.atomic_fetch_add(v0_pe, 1);
-            partitioned_edges.set_local(v0_pe, index0, edges.get_local(i));
+            partitioned_edges.set_local(v0_pe, index0, curr);
 
             if (v1_pe != v0_pe) {
                 long long index1 = partitioned_edges_counter.atomic_fetch_add(v1_pe, 1);
-                partitioned_edges.set_local(v1_pe, index1, edges.get_local(i));
+                partitioned_edges.set_local(v1_pe, index1, curr);
             }
-        }
+        });
         partitioned_edges.sync();
         unsigned long long done_partitioning = shmem_ml_current_time_us();
         if (pe == 0) {
@@ -294,11 +293,12 @@ int main(int argc, char **argv) {
             int64_t vert_neighbor_list_len = neighbor_list_offsets[i + 1] -
                 neighbor_list_offsets[i];
 
-            qsort(vert_neighbor_list, vert_neighbor_list_len,
-                    sizeof(*vert_neighbor_list), compar);
 
             int64_t new_neighbor_list_offset = index;
             if (vert_neighbor_list_len > 0) {
+                qsort(vert_neighbor_list, vert_neighbor_list_len,
+                        sizeof(*vert_neighbor_list), compar);
+
                 neighbor_lists[index++] = vert_neighbor_list[0];
                 for (int i = 1; i < vert_neighbor_list_len; i++) {
                     if (vert_neighbor_list[i] != neighbor_lists[index - 1]) {
@@ -310,6 +310,7 @@ int main(int argc, char **argv) {
             neighbor_list_offsets[i] = new_neighbor_list_offset;
         }
         neighbor_list_offsets[n_local_verts] = index;
+
         shmem_barrier_all();
         unsigned long long done_deduplicating = shmem_ml_current_time_us();
         if (pe == 0) {
@@ -347,7 +348,6 @@ int main(int argc, char **argv) {
         assert(visited);
 
         for (int root_index = 0; root_index < num_bfs_roots; root_index++) {
-            unsigned long long start_time_us = shmem_ml_current_time_us();
 
             int64_t root = bfs_roots[root_index];
             int root_pe = verts->owning_pe(root);
@@ -356,33 +356,42 @@ int main(int argc, char **argv) {
             }
             visited->set(root);
 
+            unsigned long long start_time_us = shmem_ml_current_time_us();
             int any_changes;
             int iter = 0;
             do {
                 unsigned nchanges = 0;
-                for (int64_t i = 0; i < n_local_verts; i++) {
-                    if (verts->get_local(i) < 0) {
-                        int64_t parent = (-verts->get_local(i)) - 1;
+                verts->apply_ip([&verts, &neighbor_lists, &neighbor_list_offsets, &visited, &nchanges] (
+                        const int64_t global_index,
+                        const int64_t local_index,
+                        int64_t vert_parent) {
+                    if (vert_parent < 0) {
+                        int64_t parent = (-vert_parent) - 1;
+        
                         int64_t *vert_neighbor_list = neighbor_lists +
-                            neighbor_list_offsets[i];
+                            neighbor_list_offsets[local_index];
                         int64_t vert_neighbor_list_len =
-                            neighbor_list_offsets[i + 1] -
-                            neighbor_list_offsets[i];
+                            neighbor_list_offsets[local_index + 1] -
+                            neighbor_list_offsets[local_index];
 
                         for (int j = 0; j < vert_neighbor_list_len; j++) {
                             int64_t neighbor = vert_neighbor_list[j];
                             if (!visited->is_set(neighbor)) {
                                 int64_t found_val = verts->atomic_cas(
                                         neighbor, INT64_MAX,
-                                        -(verts->local_slice_start() + i + 1));
-                                nchanges += (found_val == INT64_MAX);
+                                        -(global_index + 1));
+                                if (found_val == INT64_MAX) {
+                                    nchanges++;
+                                }
                                 visited->set(neighbor);
                             }
                         }
-                        verts->set_local(i, parent);
-                        visited->set(verts->local_slice_start() + i);
+                        int64_t old = verts->atomic_cas(global_index,
+                                vert_parent, parent);
+                        assert(old == vert_parent);
+                        visited->set(global_index);
                     }
-                }
+                });
                 changes.set_local(0, nchanges);
                 long long n_global_changes = changes.sum(0);
                 if (pe == 0) {

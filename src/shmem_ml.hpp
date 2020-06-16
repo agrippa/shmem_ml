@@ -90,6 +90,24 @@ class ShmemML1D {
             return raw_slice()[local_index];
         }
 
+        template <typename lambda>
+        inline void apply_ip(lambda&& l) {
+            const int64_t slice_size = _local_slice_end - _local_slice_start;
+            T* slice = raw_slice();
+            for (int64_t i = 0; i < slice_size; i++) {
+                l(_local_slice_start + i, i, slice[i]);
+            }
+        }
+
+        template <typename lambda>
+        inline void apply_ip(lambda& l) {
+            const int64_t slice_size = _local_slice_end - _local_slice_start;
+            T* slice = raw_slice();
+            for (int64_t i = 0; i < slice_size; i++) {
+                l(_local_slice_start + i, i, slice[i]);
+            }
+        }
+
         void atomic_add(int64_t global_index, T val);
         T atomic_fetch_add(int64_t global_index, T val);
         T atomic_cas(int64_t global_index, T expected, T update_to);
