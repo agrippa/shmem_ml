@@ -11,6 +11,10 @@
 
 #include <cstdlib>
 
+#ifdef CRAYPAT
+#include <pat_api.h>
+#endif
+
 static int *is_isolated = NULL;
 static long *psync = NULL;
 
@@ -22,14 +26,16 @@ class bitvector {
         bitvector(int64_t nglobalverts) {
             const size_t visited_ints = ((nglobalverts + BITS_PER_INT - 1) /
                     BITS_PER_INT);
-            visited_bytes = visited_ints * sizeof(unsigned);
-            visited = (unsigned *)malloc(visited_bytes);
-            assert(visited);
-            memset(visited, 0x00, visited_bytes);
+            visited = new ReplicatedShmemML1D<unsigned>(visited_ints);
+            visited->zero();
         }
 
         void clear() {
-            memset(visited, 0x00, visited_bytes);
+            visited->zero();
+        }
+
+        void sync() {
+            visited->reduce_all_or();
         }
 
         inline int is_set(const uint64_t global_vertex_id) {
@@ -37,7 +43,7 @@ class bitvector {
             const int bit_index = global_vertex_id % BITS_PER_INT;
             const unsigned mask = ((unsigned)1 << bit_index);
 
-            return (((visited[word_index] & mask) > 0) ? 1 : 0);
+            return (((visited->get(word_index) & mask) > 0) ? 1 : 0);
         }
 
         inline void set(const uint64_t global_vertex_id) {
@@ -45,12 +51,11 @@ class bitvector {
             const int bit_index = global_vertex_id % BITS_PER_INT;
             const unsigned mask = ((unsigned)1 << bit_index);
 
-            visited[word_index] |= mask;
+            visited->atomic_or(word_index, mask);
         }
 
     private:
-        unsigned *visited;
-        int64_t visited_bytes;
+        ReplicatedShmemML1D<unsigned>* visited;
 };
 
 
@@ -119,6 +124,11 @@ int64_t* compute_bfs_roots(int &num_bfs_roots, int64_t nglobalverts,
 }
 
 int main(int argc, char **argv) {
+
+#ifdef CRAYPAT
+            PAT_record(PAT_STATE_OFF);
+#endif
+
     if (argc != 4) {
         fprintf(stderr, "usage: %s <output-edges-file> <# roots> <scale>\n",
                 argv[0]);
@@ -356,12 +366,17 @@ int main(int argc, char **argv) {
             }
             visited->set(root);
 
+#ifdef CRAYPAT
+            PAT_record(PAT_STATE_ON);
+#endif
+
             unsigned long long start_time_us = shmem_ml_current_time_us();
             int any_changes;
             int iter = 0;
             do {
                 unsigned nchanges = 0;
-                verts->apply_ip([&verts, &neighbor_lists, &neighbor_list_offsets, &visited, &nchanges] (
+                unsigned nattempts = 0;
+                verts->apply_ip([&verts, &neighbor_lists, &neighbor_list_offsets, &visited, &nchanges, &nattempts] (
                         const int64_t global_index,
                         const int64_t local_index,
                         int64_t vert_parent) {
@@ -383,6 +398,7 @@ int main(int argc, char **argv) {
                                 if (found_val == INT64_MAX) {
                                     nchanges++;
                                 }
+                                nattempts++;
                                 visited->set(neighbor);
                             }
                         }
@@ -395,12 +411,18 @@ int main(int argc, char **argv) {
                 changes.set_local(0, nchanges);
                 long long n_global_changes = changes.sum(0);
                 if (pe == 0) {
-                    printf("Root %d (%ld) iter %d changes %ld\n", root_index,
-                            root, iter, n_global_changes);
+                    printf("Root %d (%ld) iter %d changes %ld (local changes "
+                            "%u, local attempts %u, %f%% useful)\n",
+                            root_index, root, iter, n_global_changes, nchanges,
+                            nattempts, 100.0 * (double)nchanges / (double)nattempts);
                 }
                 any_changes = (n_global_changes > 0);
                 iter++;
             } while(any_changes);
+
+#ifdef CRAYPAT
+            PAT_record(PAT_STATE_OFF);
+#endif
 
             unsigned long long elapsed_time_us = shmem_ml_current_time_us() -
                 start_time_us;

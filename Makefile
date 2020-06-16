@@ -2,7 +2,7 @@ CC=cc
 FLAGS=-g -O2 -Isrc -Wall -Wextra -std=c++11 -Isrc -Isrc/dlmalloc \
 	  -I$(ARROW_HOME)/include -DMSPACES=1 -DONLY_MSPACES=1 \
 	  -DHAVE_MORECORE=0 -DHAVE_MMAP=0 -DHAVE_MREMAP=0 -DUSE_LOCKS=0 \
-	  -DFOOTERS=1
+	  -DFOOTERS=1 -no-inline-max-size -no-inline-max-total-size
 LINK_FLAGS=-lshmem_ml -larrow -Lbin -L$(ARROW_HOME)/lib64
 
 bin/libshmem_ml.a: bin/dlmalloc.o bin/shmem_ml.o bin/ShmemMemoryPool.o
@@ -32,4 +32,4 @@ bin/save_load_get_set: test/save_load_get_set.cpp bin/libshmem_ml.a
 	$(CC) $(FLAGS) -o $@ test/save_load_get_set.cpp $(LINK_FLAGS)
 
 clean:
-	rm -f bin/*.o bin/*.a
+	rm -f bin/*

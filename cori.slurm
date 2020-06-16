@@ -37,6 +37,6 @@ echo
 # srun $SLURM_ARGS $HOME/shmem_ml/bin/save_load_get_set
 # echo
 echo "bfs"
-srun $SLURM_ARGS $HOME/shmem_ml/bin/bfs $SCRATCH/job.$SLURM_JOB_ID/edges.bin 1 20
+srun $SLURM_ARGS $HOME/shmem_ml/bin/bfs $SCRATCH/job.$SLURM_JOB_ID/edges.bin 1 23
 echo
 
