@@ -40,7 +40,8 @@ class bitvector {
 
         inline int is_set(const uint64_t global_vertex_id) {
             const unsigned word_index = global_vertex_id / BITS_PER_INT;
-            const int bit_index = global_vertex_id % BITS_PER_INT;
+            const int bit_index = global_vertex_id - (word_index * BITS_PER_INT);
+            // const int bit_index = global_vertex_id % BITS_PER_INT;
             const unsigned mask = ((unsigned)1 << bit_index);
 
             return (((visited->get(word_index) & mask) > 0) ? 1 : 0);
@@ -48,7 +49,8 @@ class bitvector {
 
         inline void set(const uint64_t global_vertex_id) {
             const int word_index = global_vertex_id / BITS_PER_INT;
-            const int bit_index = global_vertex_id % BITS_PER_INT;
+            const int bit_index = global_vertex_id - (word_index * BITS_PER_INT);
+            // const int bit_index = global_vertex_id % BITS_PER_INT;
             const unsigned mask = ((unsigned)1 << bit_index);
 
             visited->atomic_or(word_index, mask);
@@ -165,8 +167,10 @@ int main(int argc, char **argv) {
         generate_kronecker_range(seed, SCALE, start_edge_index, end_edge_index,
                 edges.raw_slice());
 
-        ShmemML1D<int64_t> *verts = new ShmemML1D<int64_t>(nvertices, INT64_MAX);
+        ShmemML1D<int64_t> *verts = new ShmemML1D<int64_t>(nvertices);
         assert(verts);
+        verts->clear(INT64_MAX);
+
         int64_t n_local_verts = verts->local_slice_end() -
             verts->local_slice_start();
         if (pe == 0) {
@@ -185,7 +189,9 @@ int main(int argc, char **argv) {
          * We remove self loops here, and trim duplicate edges below.
          */
 
-        ShmemML1D<long long> edges_per_pe(npes, (long long)0);
+        ShmemML1D<long long> edges_per_pe(npes);
+        edges_per_pe.clear(0);
+
         edges.apply_ip([verts, &edges_per_pe] (int64_t global_index, int64_t local_index, packed_edge curr) {
             int64_t v0 = get_v0_from_edge(&curr);
             int64_t v1 = get_v1_from_edge(&curr);
@@ -205,7 +211,9 @@ int main(int argc, char **argv) {
         long long max_edges_per_pe = edges_per_pe.max(-1);
 
         ShmemML1D<packed_edge> partitioned_edges(max_edges_per_pe * npes);
-        ShmemML1D<int64_t> partitioned_edges_counter(npes, 0);
+        ShmemML1D<int64_t> partitioned_edges_counter((int64_t)npes);
+        partitioned_edges_counter.clear(0);
+
         edges.apply_ip([verts, &partitioned_edges_counter, &partitioned_edges, &edges] (int64_t global_index, int64_t local_index, packed_edge curr) {
             int64_t v0 = get_v0_from_edge(&curr);
             int64_t v1 = get_v1_from_edge(&curr);
@@ -370,6 +378,7 @@ int main(int argc, char **argv) {
             PAT_record(PAT_STATE_ON);
 #endif
 
+            shmem_barrier_all();
             unsigned long long start_time_us = shmem_ml_current_time_us();
             int any_changes;
             int iter = 0;
@@ -418,12 +427,17 @@ int main(int argc, char **argv) {
                 }
                 any_changes = (n_global_changes > 0);
                 iter++;
+
+                if (any_changes) {
+                    visited->sync();
+                }
             } while(any_changes);
 
 #ifdef CRAYPAT
             PAT_record(PAT_STATE_OFF);
 #endif
 
+            shmem_barrier_all();
             unsigned long long elapsed_time_us = shmem_ml_current_time_us() -
                 start_time_us;
             if (pe == 0) {
@@ -432,9 +446,10 @@ int main(int argc, char **argv) {
             }
 
             delete verts;
-            ShmemML1D<int64_t> *verts = new ShmemML1D<int64_t>(nvertices,
-                    INT64_MAX);
+            ShmemML1D<int64_t> *verts = new ShmemML1D<int64_t>(nvertices);
             assert(verts);
+            verts->clear(INT64_MAX);
+
             visited->clear();
         }
 

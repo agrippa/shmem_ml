@@ -7,10 +7,12 @@
 #include <arrow/array/builder_binary.h>
 #include <arrow/io/file.h>
 
+#define SHMEMML_MAX(_a, _b) (((_a) > (_b)) ? (_a) : (_b))
+
 template <typename T>
 class ShmemML1D {
     public:
-        ShmemML1D(int64_t N) {
+        ShmemML1D(int64_t N, unsigned max_shmem_reduction_n = 1) {
             _N = N;
             int npes = shmem_n_pes();
             _chunk_size = (_N + npes - 1) / npes;
@@ -28,7 +30,8 @@ class ShmemML1D {
 
             symm_reduce_dest = (T*)shmem_malloc(sizeof(*symm_reduce_dest));
             symm_reduce_src = (T*)shmem_malloc(sizeof(*symm_reduce_src));
-            pwork = (T*)shmem_malloc(SHMEM_REDUCE_MIN_WRKDATA_SIZE * sizeof(*pwork));
+
+            pwork = (T*)shmem_malloc(SHMEMML_MAX(max_shmem_reduction_n / 2 + 1, SHMEM_REDUCE_MIN_WRKDATA_SIZE) * sizeof(*pwork));
             psync = (long*)shmem_malloc(SHMEM_REDUCE_SYNC_SIZE * sizeof(*psync));
             assert(symm_reduce_dest && symm_reduce_src && pwork && psync);
 
@@ -36,7 +39,7 @@ class ShmemML1D {
             shmem_barrier_all();
         }
 
-        ShmemML1D(int64_t N, T init_val) : ShmemML1D(N) {
+        void clear(T init_val) {
             T* local_slice = raw_slice();
             int64_t local_slice_len = local_slice_end() - local_slice_start();
             for (int64_t i = 0; i < local_slice_len; i++) {
@@ -306,12 +309,7 @@ class ReplicatedShmemML1D : public ShmemML1D<T> {
         int64_t _replicated_N;
 
     public:
-        ReplicatedShmemML1D(int64_t N) : ShmemML1D<T>(N * shmem_n_pes()) {
-            _replicated_N = N;
-        }
-
-        ReplicatedShmemML1D(int64_t N, T init_val) :
-                ShmemML1D<T>(N * shmem_n_pes(), init_val) {
+        ReplicatedShmemML1D(int64_t N) : ShmemML1D<T>(N * shmem_n_pes(), (unsigned)N) {
             _replicated_N = N;
         }
 
