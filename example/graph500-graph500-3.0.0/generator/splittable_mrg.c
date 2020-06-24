@@ -63,7 +63,7 @@ typedef struct mrg_transition_matrix {
 } mrg_transition_matrix;
 
 #ifdef DUMP_TRANSITION_TABLE
-static void mrg_update_cache(mrg_transition_matrix* restrict p) { /* Set a, b, c, and d */
+static void mrg_update_cache(mrg_transition_matrix* p) { /* Set a, b, c, and d */
   p->a = mod_add(mod_mul_x(p->s), p->t);
   p->b = mod_add(mod_mul_x(p->a), p->u);
   p->c = mod_add(mod_mul_x(p->b), p->v);
@@ -83,7 +83,7 @@ static void mrg_make_A(mrg_transition_matrix* result) { /* Initial RNG transitio
 }
 
 /* Multiply two transition matrices; result may alias either/both inputs. */
-static void mrg_multiply(const mrg_transition_matrix* restrict m, const mrg_transition_matrix* restrict n, mrg_transition_matrix* result) {
+static void mrg_multiply(const mrg_transition_matrix* m, const mrg_transition_matrix* n, mrg_transition_matrix* result) {
   uint_least32_t rs = mod_mac(mod_mac(mod_mac(mod_mac(mod_mul(m->s, n->d), m->t, n->c), m->u, n->b), m->v, n->a), m->w, n->s);
   uint_least32_t rt = mod_mac(mod_mac(mod_mac(mod_mac(mod_mul_y(mod_mul(m->s, n->s)), m->t, n->w), m->u, n->v), m->v, n->u), m->w, n->t);
   uint_least32_t ru = mod_mac(mod_mac(mod_mac(mod_mul_y(mod_mac(mod_mul(m->s, n->a), m->t, n->s)), m->u, n->w), m->v, n->v), m->w, n->u);
@@ -98,7 +98,7 @@ static void mrg_multiply(const mrg_transition_matrix* restrict m, const mrg_tran
 }
 
 /* No aliasing allowed */
-static void mrg_power(const mrg_transition_matrix* restrict m, unsigned int exponent, mrg_transition_matrix* restrict result) {
+static void mrg_power(const mrg_transition_matrix* m, unsigned int exponent, mrg_transition_matrix* result) {
   mrg_transition_matrix current_power_of_2 = *m;
   mrg_make_identity(result);
   while (exponent > 0) {
@@ -113,7 +113,7 @@ static void mrg_power(const mrg_transition_matrix* restrict m, unsigned int expo
 #ifdef __MTA__
 #pragma mta inline
 #endif
-static void mrg_apply_transition(const mrg_transition_matrix* restrict mat, const mrg_state* restrict st, mrg_state* r) {
+static void mrg_apply_transition(const mrg_transition_matrix* mat, const mrg_state* st, mrg_state* r) {
 #ifdef __MTA__
   uint_fast64_t s = mat->s;
   uint_fast64_t t = mat->t;
