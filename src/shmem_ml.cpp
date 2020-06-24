@@ -82,3 +82,9 @@ long long ShmemML1D<long long>::sum(long long zero_val) {
     return *symm_reduce_dest;
 }
 
+void ShmemML1D<int64_t>::atomic_or(int64_t global_index, int64_t mask) {
+    int pe = global_index / _chunk_size;
+    int64_t offset = global_index % _chunk_size;
+
+    return shmem_int64_atomic_or(raw_slice() + offset, mask, pe);
+}

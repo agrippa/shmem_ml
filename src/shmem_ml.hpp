@@ -7,10 +7,12 @@
 #include <arrow/array/builder_binary.h>
 #include <arrow/io/file.h>
 
+#define SHMEMML_MAX(_a, _b) (((_a) > (_b)) ? (_a) : (_b))
+
 template <typename T>
 class ShmemML1D {
     public:
-        ShmemML1D(int64_t N) {
+        ShmemML1D(int64_t N, unsigned max_shmem_reduction_n = 1) {
             _N = N;
             int npes = shmem_n_pes();
             _chunk_size = (_N + npes - 1) / npes;
@@ -28,7 +30,8 @@ class ShmemML1D {
 
             symm_reduce_dest = (T*)shmem_malloc(sizeof(*symm_reduce_dest));
             symm_reduce_src = (T*)shmem_malloc(sizeof(*symm_reduce_src));
-            pwork = (T*)shmem_malloc(SHMEM_REDUCE_MIN_WRKDATA_SIZE * sizeof(*pwork));
+
+            pwork = (T*)shmem_malloc(SHMEMML_MAX(max_shmem_reduction_n / 2 + 1, SHMEM_REDUCE_MIN_WRKDATA_SIZE) * sizeof(*pwork));
             psync = (long*)shmem_malloc(SHMEM_REDUCE_SYNC_SIZE * sizeof(*psync));
             assert(symm_reduce_dest && symm_reduce_src && pwork && psync);
 
@@ -36,7 +39,7 @@ class ShmemML1D {
             shmem_barrier_all();
         }
 
-        ShmemML1D(int64_t N, T init_val) : ShmemML1D(N) {
+        void clear(T init_val) {
             T* local_slice = raw_slice();
             int64_t local_slice_len = local_slice_end() - local_slice_start();
             for (int64_t i = 0; i < local_slice_len; i++) {
@@ -111,6 +114,7 @@ class ShmemML1D {
         void atomic_add(int64_t global_index, T val);
         T atomic_fetch_add(int64_t global_index, T val);
         T atomic_cas(int64_t global_index, T expected, T update_to);
+        void atomic_or(int64_t global_index, T mask);
         T max(T min_val);
         T sum(T zero_val);
 
@@ -192,6 +196,10 @@ class ShmemML1D {
             return new_arr;
         }
 
+    protected:
+        T* pwork;
+        long *psync;
+
     private:
         int64_t calculate_local_slice_start(int pe) {
             return pe * _chunk_size;
@@ -213,8 +221,6 @@ class ShmemML1D {
         std::shared_ptr<arrow::FixedSizeBinaryArray> _arr;
         T* symm_reduce_dest;
         T* symm_reduce_src;
-        T* pwork;
-        long *psync;
 };
 
 template<>
@@ -234,7 +240,145 @@ template<>
 long long ShmemML1D<long long>::max(long long min_val);
 
 template<>
+void ShmemML1D<int64_t>::atomic_or(int64_t global_index, int64_t mask);
+
+template<>
 long long ShmemML1D<long long>::sum(long long zero_val);
+
+template <typename T>
+class ReplicatedShmemML1D : public ShmemML1D<T> {
+    private:
+        int64_t _replicated_N;
+
+    public:
+        ReplicatedShmemML1D(int64_t N) : ShmemML1D<T>(N * shmem_n_pes(), (unsigned)N) {
+            _replicated_N = N;
+        }
+
+        inline int64_t N() { return _replicated_N; }
+        inline int64_t local_slice_start() { return 0; }
+        inline int64_t local_slice_end() { return _replicated_N; }
+        inline int owning_pe(int64_t global_index) {
+            return shmem_my_pe();
+        }
+
+        // Inefficient but simple
+        inline T get(int64_t global_index) {
+            return this->raw_slice()[global_index];
+        }
+
+        inline void set(int64_t global_index, T val) {
+            this->raw_slice()[global_index] = val;
+        }
+
+        inline void set_local(int pe, int64_t local_index, T val) {
+            throw std::runtime_error("set_local unsupported on ReplicatedShmemML1D");
+        }
+
+        inline void set_local(int64_t local_index, T val) {
+            throw std::runtime_error("set_local unsupported on ReplicatedShmemML1D");
+        }
+
+        inline T get_local(int64_t local_index) {
+            throw std::runtime_error("get_local unsupported on ReplicatedShmemML1D");
+        }
+
+        template <typename lambda>
+        inline void apply_ip(lambda&& l) {
+            T* slice = raw_slice();
+            for (int64_t i = 0; i < _replicated_N; i++) {
+                l(i, i, slice[i]);
+            }
+        }
+
+        template <typename lambda>
+        inline void apply_ip(lambda& l) {
+            T* slice = raw_slice();
+            for (int64_t i = 0; i < _replicated_N; i++) {
+                l(i, i, slice[i]);
+            }
+        }
+
+        void atomic_add(int64_t global_index, T val) {
+            raw_slice()[global_index] += val;
+        }
+
+        T atomic_fetch_add(int64_t global_index, T val) {
+            T old = raw_slice()[global_index];
+            raw_slice()[global_index] = old + val;
+            return old;
+        }
+
+        T atomic_cas(int64_t global_index, T expected, T update_to) {
+            T old = raw_slice()[global_index];
+            if (old == expected) {
+                raw_slice()[global_index] = update_to;
+            }
+            return old;
+        }
+
+        void atomic_or(int64_t global_index, T mask) {
+            this->raw_slice()[global_index] |= mask;
+        }
+
+        T sum(T zero_val) {
+            T s = zero_val;
+            T* slice = raw_slice();
+            for (int64_t i = 0; i < _replicated_N; i++) {
+                s += slice[i];
+            }
+            return s;
+        }
+
+        T max(T min_val) {
+            T s = min_val;
+            T* slice = raw_slice();
+            for (int64_t i = 0; i < _replicated_N; i++) {
+                if (slice[i] > s) {
+                    s = slice[i];
+                }
+            }
+            return s;
+        }
+
+        void save(const char *filename) {
+            throw std::runtime_error("save unsupported on ReplicatedShmemML1D");
+        }
+
+        static ShmemML1D<T>* load(const char *filename) {
+            throw std::runtime_error("load unsupported on ReplicatedShmemML1D");
+        }
+
+        void reduce_all_or();
+
+        void zero() {
+            memset(this->raw_slice(), 0x00, _replicated_N * sizeof(T));
+            shmem_barrier_all();
+        }
+};
+
+template<>
+void ReplicatedShmemML1D<int>::reduce_all_or() {
+    for (int i = 0; i < SHMEM_REDUCE_SYNC_SIZE; i++) {
+        psync[i] = SHMEM_SYNC_VALUE;
+    }
+    shmem_barrier_all();
+    shmem_int_or_to_all(raw_slice(), raw_slice(), _replicated_N, 0, 0,
+            shmem_n_pes(), pwork, psync);
+    shmem_barrier_all();
+}
+
+template<>
+void ReplicatedShmemML1D<unsigned>::reduce_all_or() {
+    for (int i = 0; i < SHMEM_REDUCE_SYNC_SIZE; i++) {
+        psync[i] = SHMEM_SYNC_VALUE;
+    }
+    shmem_barrier_all();
+    shmem_int_or_to_all((int*)raw_slice(), (int*)raw_slice(), _replicated_N, 0, 0,
+            shmem_n_pes(), (int*)pwork, psync);
+    shmem_barrier_all();
+}
+
 
 unsigned long long shmem_ml_current_time_us();
 
