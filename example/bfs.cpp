@@ -425,7 +425,7 @@ int main(int argc, char **argv) {
                     printf("Root %d (%ld) iter %d changes %ld (local changes "
                             "%u, local attempts %u, %f%% useful)\n",
                             root_index, root, iter, n_global_changes, nchanges,
-                            nattempts, 100.0 * (double)nchanges / (double)nattempts);
+                            nattempts, nattempts == 0 ? 0.0 : 100.0 * (double)nchanges / (double)nattempts);
                 }
                 any_changes = (n_global_changes > 0);
                 iter++;

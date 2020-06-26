@@ -40,7 +40,7 @@ class ShmemML1D {
         }
 
         void clear(T init_val) {
-            T* local_slice = raw_slice();
+            T* local_slice = this->raw_slice();
             int64_t local_slice_len = local_slice_end() - local_slice_start();
             for (int64_t i = 0; i < local_slice_len; i++) {
                 local_slice[i] = init_val;
@@ -285,7 +285,7 @@ class ReplicatedShmemML1D : public ShmemML1D<T> {
 
         template <typename lambda>
         inline void apply_ip(lambda&& l) {
-            T* slice = raw_slice();
+            T* slice = this->raw_slice();
             for (int64_t i = 0; i < _replicated_N; i++) {
                 l(i, i, slice[i]);
             }
@@ -293,26 +293,26 @@ class ReplicatedShmemML1D : public ShmemML1D<T> {
 
         template <typename lambda>
         inline void apply_ip(lambda& l) {
-            T* slice = raw_slice();
+            T* slice = this->raw_slice();
             for (int64_t i = 0; i < _replicated_N; i++) {
                 l(i, i, slice[i]);
             }
         }
 
         void atomic_add(int64_t global_index, T val) {
-            raw_slice()[global_index] += val;
+            this->raw_slice()[global_index] += val;
         }
 
         T atomic_fetch_add(int64_t global_index, T val) {
-            T old = raw_slice()[global_index];
-            raw_slice()[global_index] = old + val;
+            T old = this->raw_slice()[global_index];
+            this->raw_slice()[global_index] = old + val;
             return old;
         }
 
         T atomic_cas(int64_t global_index, T expected, T update_to) {
-            T old = raw_slice()[global_index];
+            T old = this->raw_slice()[global_index];
             if (old == expected) {
-                raw_slice()[global_index] = update_to;
+                this->raw_slice()[global_index] = update_to;
             }
             return old;
         }
@@ -323,7 +323,7 @@ class ReplicatedShmemML1D : public ShmemML1D<T> {
 
         T sum(T zero_val) {
             T s = zero_val;
-            T* slice = raw_slice();
+            T* slice = this->raw_slice();
             for (int64_t i = 0; i < _replicated_N; i++) {
                 s += slice[i];
             }
@@ -332,7 +332,7 @@ class ReplicatedShmemML1D : public ShmemML1D<T> {
 
         T max(T min_val) {
             T s = min_val;
-            T* slice = raw_slice();
+            T* slice = this->raw_slice();
             for (int64_t i = 0; i < _replicated_N; i++) {
                 if (slice[i] > s) {
                     s = slice[i];
@@ -358,27 +358,10 @@ class ReplicatedShmemML1D : public ShmemML1D<T> {
 };
 
 template<>
-void ReplicatedShmemML1D<int>::reduce_all_or() {
-    for (int i = 0; i < SHMEM_REDUCE_SYNC_SIZE; i++) {
-        psync[i] = SHMEM_SYNC_VALUE;
-    }
-    shmem_barrier_all();
-    shmem_int_or_to_all(raw_slice(), raw_slice(), _replicated_N, 0, 0,
-            shmem_n_pes(), pwork, psync);
-    shmem_barrier_all();
-}
+void ReplicatedShmemML1D<int>::reduce_all_or();
 
 template<>
-void ReplicatedShmemML1D<unsigned>::reduce_all_or() {
-    for (int i = 0; i < SHMEM_REDUCE_SYNC_SIZE; i++) {
-        psync[i] = SHMEM_SYNC_VALUE;
-    }
-    shmem_barrier_all();
-    shmem_int_or_to_all((int*)raw_slice(), (int*)raw_slice(), _replicated_N, 0, 0,
-            shmem_n_pes(), (int*)pwork, psync);
-    shmem_barrier_all();
-}
-
+void ReplicatedShmemML1D<unsigned>::reduce_all_or();
 
 unsigned long long shmem_ml_current_time_us();
 

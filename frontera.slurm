@@ -2,8 +2,8 @@
 
 #SBATCH -J SHMEM_ML           # Job name
 #SBATCH -p development        # Queue (partition) name
-#SBATCH -N 4               # Total # of nodes (must be 1 for serial)
-#SBATCH -n 8
+#SBATCH -N 8               # Total # of nodes (must be 1 for serial)
+#SBATCH --ntasks-per-node=56
 #SBATCH -t 00:20:00        # Run time (hh:mm:ss)
 #SBATCH --mail-type=all    # Send email at begin and end of job
 #SBATCH --mail-user=max.grossman@gatech.edu
@@ -39,6 +39,6 @@ echo
 # echo
 echo "bfs"
 # srun $SLURM_ARGS $HOME/shmem_ml/bin/bfs $SCRATCH/job.$SLURM_JOB_ID/edges.bin 1 20
-oshrun $HOME/shmem_ml/bin/bfs $SCRATCH/job.$SLURM_JOB_ID/edges.bin 1 20
+oshrun $HOME/shmem_ml/bin/bfs $SCRATCH/job.$SLURM_JOB_ID/edges.bin 1 23
 echo
 
