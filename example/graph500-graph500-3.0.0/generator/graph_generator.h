@@ -19,6 +19,7 @@
 #define __STDC_FORMAT_MACROS
 #endif
 #include <inttypes.h>
+#include <stdbool.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -30,6 +31,13 @@ typedef struct packed_edge {
   uint32_t v0_low;
   uint32_t v1_low;
   uint32_t high; /* v1 in high half, v0 in low half */
+
+#ifdef __cplusplus
+  inline bool operator==(const packed_edge& rhs) const {
+      return v0_low == rhs.v0_low && v1_low == rhs.v1_low &&
+          high == rhs.high;
+  }
+#endif
 } packed_edge;
 
 static inline int64_t get_v0_from_edge(const packed_edge* p) {

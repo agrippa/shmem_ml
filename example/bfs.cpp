@@ -127,6 +127,18 @@ int64_t* compute_bfs_roots(int &num_bfs_roots, int64_t nglobalverts,
     return bfs_roots;
 }
 
+static unsigned nchanges;
+
+#ifdef ATOMICS_AS_MSGS
+void verts_atomics_cb(ShmemML1D<int64_t>* verts, atomics_msg_op_t op, int64_t prev_val, int64_t new_val) {
+    if (op == CAS) {
+        if (prev_val == INT64_MAX) {
+            nchanges++;
+        }
+    }
+}
+#endif
+
 int main(int argc, char **argv) {
 
 #ifdef CRAYPAT
@@ -169,7 +181,7 @@ int main(int argc, char **argv) {
         generate_kronecker_range(seed, SCALE, start_edge_index, end_edge_index,
                 edges.raw_slice());
 
-        ShmemML1D<int64_t> *verts = new ShmemML1D<int64_t>(nvertices);
+        ShmemML1D<int64_t> *verts = new ShmemML1D<int64_t>(nvertices, 1, verts_atomics_cb);
         assert(verts);
         verts->clear(INT64_MAX);
 
@@ -385,9 +397,9 @@ int main(int argc, char **argv) {
             int any_changes;
             int iter = 0;
             do {
-                unsigned nchanges = 0;
+                nchanges = 0;
                 unsigned nattempts = 0;
-                verts->apply_ip([&verts, &neighbor_lists, &neighbor_list_offsets, &visited, &nchanges, &nattempts] (
+                verts->apply_ip([&verts, &neighbor_lists, &neighbor_list_offsets, &visited, &nattempts] (
                         const int64_t global_index,
                         const int64_t local_index,
                         int64_t vert_parent) {
@@ -403,13 +415,17 @@ int main(int argc, char **argv) {
                         for (int j = 0; j < vert_neighbor_list_len; j++) {
                             int64_t neighbor = vert_neighbor_list[j];
                             if (!visited->is_set(neighbor)) {
+#ifdef ATOMICS_AS_MSGS
+                                verts->atomic_cas_msg(neighbor, INT64_MAX,
+                                        -(global_index + 1));
+#else
                                 int64_t found_val = verts->atomic_cas(
                                         neighbor, INT64_MAX,
                                         -(global_index + 1));
                                 if (found_val == INT64_MAX) {
                                     nchanges++;
                                 }
-                                nattempts++;
+#endif
                                 visited->set(neighbor);
                             }
                         }
@@ -419,13 +435,14 @@ int main(int argc, char **argv) {
                         visited->set(global_index);
                     }
                 });
+                verts->sync();
+
                 changes.set_local(0, nchanges);
                 long long n_global_changes = changes.sum(0);
                 if (pe == 0) {
                     printf("Root %d (%ld) iter %d changes %ld (local changes "
-                            "%u, local attempts %u, %f%% useful)\n",
-                            root_index, root, iter, n_global_changes, nchanges,
-                            nattempts, nattempts == 0 ? 0.0 : 100.0 * (double)nchanges / (double)nattempts);
+                            "%u)\n",
+                            root_index, root, iter, n_global_changes, nchanges);
                 }
                 any_changes = (n_global_changes > 0);
                 iter++;

@@ -5,7 +5,7 @@ FLAGS=-g -O2 -Isrc -Wall -Wextra -std=c++11 -Isrc -Isrc/dlmalloc \
 	  -DFOOTERS=1 -no-inline-max-size -no-inline-max-total-size
 LINK_FLAGS=-lshmem_ml -larrow -Lbin -L$(ARROW_HOME)/lib64
 
-bin/libshmem_ml.a: bin/dlmalloc.o bin/shmem_ml.o bin/ShmemMemoryPool.o
+bin/libshmem_ml.a: bin/dlmalloc.o bin/shmem_ml.o bin/ShmemMemoryPool.o bin/mailbox.o bin/mailbox_buffer.o
 	ar rcs $@ $^
 
 bin/dlmalloc.o: src/dlmalloc/dlmalloc.c
@@ -15,6 +15,12 @@ bin/shmem_ml.o: src/shmem_ml.cpp
 	$(CC) $(FLAGS) -fPIC -c -o $@ $^
 
 bin/ShmemMemoryPool.o: src/ShmemMemoryPool.cpp
+	$(CC) $(FLAGS) -fPIC -c -o $@ $^
+
+bin/mailbox.o: src/mailbox.cpp
+	$(CC) $(FLAGS) -fPIC -c -o $@ $^
+
+bin/mailbox_buffer.o: src/mailbox_buffer.cpp
 	$(CC) $(FLAGS) -fPIC -c -o $@ $^
 
 bin/bfs: example/bfs.cpp \

@@ -2,17 +2,50 @@
 #define _SHMEM_ML_HPP
 
 #include <shmem_ml_utils.hpp>
+#include <mailbox.hpp>
+#include <mailbox_buffer.hpp>
 #include <ShmemMemoryPool.hpp>
 #include <arrow/array.h>
 #include <arrow/array/builder_binary.h>
 #include <arrow/io/file.h>
 
+#define ATOMICS_AS_MSGS
+
 #define SHMEMML_MAX(_a, _b) (((_a) > (_b)) ? (_a) : (_b))
+
+#ifdef ATOMICS_AS_MSGS
+#define MAX_BUFFERED_ATOMICS 1024
+
+template <typename T>
+class ShmemML1D;
+
+typedef enum {
+    CAS = 0,
+    DONE
+} atomics_msg_op_t;
+
+template <typename T>
+struct atomics_msg_t {
+    int64_t local_index;
+    T cmp;
+    T val;
+    atomics_msg_op_t op;
+};
+
+template<typename T>
+using atomics_msg_result_handler = void (*)(ShmemML1D<T>*, atomics_msg_op_t, T prev_val, T new_val);
+
+#endif
 
 template <typename T>
 class ShmemML1D {
     public:
-        ShmemML1D(int64_t N, unsigned max_shmem_reduction_n = 1) {
+        ShmemML1D(int64_t N,
+                unsigned max_shmem_reduction_n = 1
+#ifdef ATOMICS_AS_MSGS
+                , atomics_msg_result_handler<T> _atomics_cb = NULL
+#endif
+                ) {
             _N = N;
             int npes = shmem_n_pes();
             _chunk_size = (_N + npes - 1) / npes;
@@ -31,9 +64,21 @@ class ShmemML1D {
             symm_reduce_dest = (T*)shmem_malloc(sizeof(*symm_reduce_dest));
             symm_reduce_src = (T*)shmem_malloc(sizeof(*symm_reduce_src));
 
-            pwork = (T*)shmem_malloc(SHMEMML_MAX(max_shmem_reduction_n / 2 + 1, SHMEM_REDUCE_MIN_WRKDATA_SIZE) * sizeof(*pwork));
+            pwork = (T*)shmem_malloc(SHMEMML_MAX(max_shmem_reduction_n / 2 + 1,
+                        SHMEM_REDUCE_MIN_WRKDATA_SIZE) * sizeof(*pwork));
             psync = (long*)shmem_malloc(SHMEM_REDUCE_SYNC_SIZE * sizeof(*psync));
             assert(symm_reduce_dest && symm_reduce_src && pwork && psync);
+
+#ifdef ATOMICS_AS_MSGS
+            mailbox_init(&atomics_mailbox, 32 * 1024 * 1024);
+            mailbox_buffer_init(&atomics_mailbox_buffer, &atomics_mailbox,
+                    npes, sizeof(atomics_msg_t<T>), MAX_BUFFERED_ATOMICS);
+            buffered_atomics = (atomics_msg_t<T>*)malloc(
+                    MAX_BUFFERED_ATOMICS * sizeof(*buffered_atomics));
+            assert(buffered_atomics);
+            n_done_pes = 0;
+            atomics_cb = _atomics_cb;
+#endif
 
             // Ensure all PEs have completed construction
             shmem_barrier_all();
@@ -118,7 +163,57 @@ class ShmemML1D {
         T max(T min_val);
         T sum(T zero_val);
 
+#ifdef ATOMICS_AS_MSGS
+        void atomic_cas_msg(int64_t global_index, T expected, T update_to) {
+            int pe = global_index / _chunk_size;
+            int64_t offset = global_index % _chunk_size;
+
+            atomics_msg_t<T> msg;
+            msg.local_index = offset;
+            msg.cmp = expected;
+            msg.val = update_to;
+            msg.op = CAS;
+
+            int success;
+            do {
+                success = mailbox_buffer_send(&msg, sizeof(msg),
+                        pe, 100, &atomics_mailbox_buffer);
+                if (!success) {
+                    process_atomic_msgs();
+                }
+            } while (!success);
+        }
+#endif
+
         void sync() {
+#ifdef ATOMICS_AS_MSGS
+            atomics_msg_t<T> msg;
+            msg.op = DONE;
+            for (int p = 0; p < shmem_n_pes(); p++) {
+                int success;
+                do {
+                    success = mailbox_buffer_send(&msg, sizeof(msg), p, 100,
+                            &atomics_mailbox_buffer);
+                    if (!success) {
+                        process_atomic_msgs();
+                    }
+                } while (!success);
+            }
+
+            int success;
+            do {
+                success = mailbox_buffer_flush(&atomics_mailbox_buffer, 100);
+                if (!success) {
+                    process_atomic_msgs();
+                }
+            } while (!success);
+
+            while (n_done_pes < shmem_n_pes()) {
+                process_atomic_msgs();
+            }
+
+            n_done_pes = 0;
+#endif
             shmem_barrier_all();
         }
 
@@ -201,6 +296,40 @@ class ShmemML1D {
         long *psync;
 
     private:
+        void process_atomic_msgs() {
+            int success;
+            do {
+                T old_val, new_val;
+                size_t msg_len;
+                success = mailbox_recv(buffered_atomics,
+                        MAX_BUFFERED_ATOMICS * sizeof(*buffered_atomics),
+                        &msg_len, &atomics_mailbox);
+                if (success) {
+                    assert(msg_len % sizeof(*buffered_atomics) == 0);
+                    size_t nmsgs = msg_len / sizeof(*buffered_atomics);
+                    for (int m = 0; m < nmsgs; m++) {
+                        atomics_msg_t<T> *msg = &buffered_atomics[m];
+                        switch (msg->op) {
+                            case (CAS):
+                                old_val = new_val = raw_slice()[msg->local_index];
+                                if (old_val == msg->cmp) {
+                                    raw_slice()[msg->local_index] = new_val = msg->val;
+                                }
+                                break;
+                            case (DONE):
+                                n_done_pes++;
+                                break;
+                            default:
+                                abort();
+                        }
+                        if (atomics_cb) {
+                            atomics_cb(this, msg->op, old_val, new_val);
+                        }
+                    }
+                }
+            } while (success);
+        }
+
         int64_t calculate_local_slice_start(int pe) {
             return pe * _chunk_size;
         }
@@ -221,6 +350,14 @@ class ShmemML1D {
         std::shared_ptr<arrow::FixedSizeBinaryArray> _arr;
         T* symm_reduce_dest;
         T* symm_reduce_src;
+
+#ifdef ATOMICS_AS_MSGS
+        mailbox_t atomics_mailbox;
+        mailbox_buffer_t atomics_mailbox_buffer;
+        atomics_msg_t<T> *buffered_atomics;
+        int n_done_pes;
+        atomics_msg_result_handler<T> atomics_cb;
+#endif
 };
 
 template<>

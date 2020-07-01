@@ -39,7 +39,6 @@ int64_t ShmemML1D<int64_t>::atomic_cas(int64_t global_index, int64_t expected,
         int64_t update_to) {
     int pe = global_index / _chunk_size;
     int64_t offset = global_index % _chunk_size;
-
     return shmem_int64_atomic_compare_swap(raw_slice() + offset, expected,
             update_to, pe);
 }
