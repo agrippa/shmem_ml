@@ -1,7 +1,7 @@
 #!/bin/bash -l
 
 #SBATCH -p debug
-#SBATCH -N 8
+#SBATCH -N 4
 #SBATCH -C haswell
 #SBATCH -t 00:30:00
 #SBATCH -J SHMEM_ML
@@ -38,7 +38,7 @@ echo
 # echo
 echo "bfs"
 # for REPEAT in {1..3}; do
-    srun $SLURM_ARGS $HOME/shmem_ml/bin/bfs $SCRATCH/job.$SLURM_JOB_ID/edges.bin 1 29
+    srun $SLURM_ARGS $HOME/shmem_ml/bin/bfs $SCRATCH/job.$SLURM_JOB_ID/edges.bin 5 26
     echo
 # done
 

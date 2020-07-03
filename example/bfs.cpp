@@ -181,7 +181,11 @@ int main(int argc, char **argv) {
         generate_kronecker_range(seed, SCALE, start_edge_index, end_edge_index,
                 edges.raw_slice());
 
+#ifdef ATOMICS_AS_MSGS
         ShmemML1D<int64_t> *verts = new ShmemML1D<int64_t>(nvertices, 1, verts_atomics_cb);
+#else
+        ShmemML1D<int64_t> *verts = new ShmemML1D<int64_t>(nvertices);
+#endif
         assert(verts);
         verts->clear(INT64_MAX);
 
@@ -465,7 +469,11 @@ int main(int argc, char **argv) {
             }
 
             delete verts;
-            ShmemML1D<int64_t> *verts = new ShmemML1D<int64_t>(nvertices);
+#ifdef ATOMICS_AS_MSGS
+            verts = new ShmemML1D<int64_t>(nvertices, 1, verts_atomics_cb);
+#else
+            verts = new ShmemML1D<int64_t>(nvertices);
+#endif
             assert(verts);
             verts->clear(INT64_MAX);
 
