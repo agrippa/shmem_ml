@@ -39,23 +39,56 @@ using atomics_msg_result_handler = void (*)(ShmemML1D<T>* arr,
 
 #endif
 
+#define _BITS_PER_BYTE 8
+#define _BITS_PER_INT (sizeof(unsigned) * _BITS_PER_BYTE)
+
 class ShmemML1DIndex {
     private:
-        std::set<int64_t> indices;
+        int64_t N;
+        unsigned *bitvector;
+        unsigned bitvector_size;
+
+        int64_t *list;
+        int64_t list_len;
+
+        static int index_compare(const void *a, const void *b) {
+            const int64_t *ia = (const int64_t *)a;
+            const int64_t *ib = (const int64_t *)b;
+            return *ia - *ib;
+        }
 
     public:
-        ShmemML1DIndex() { }
+        ShmemML1DIndex(int64_t _N) : N(_N), list_len(0) {
+            bitvector_size = ((N + _BITS_PER_INT - 1) /
+                    _BITS_PER_INT);
+            bitvector = (unsigned *)malloc(bitvector_size * sizeof(*bitvector));
+            list = (int64_t *)malloc(N * sizeof(*list));
+            assert(bitvector && list);
+            memset(bitvector, 0x00, bitvector_size * sizeof(*bitvector));
+        }
 
         void add(int64_t i) {
-            indices.insert(i);
+            const unsigned word_index = i / _BITS_PER_INT;
+            const int bit_index = i - (word_index * _BITS_PER_INT);
+            const unsigned mask = ((unsigned)1 << bit_index);
+            if ((bitvector[word_index] & mask) == 0) {
+                bitvector[word_index] = (bitvector[word_index] | mask);
+                list[list_len++] = i;
+            }
         }
 
         void clear() {
-            indices.clear();
+            list_len = 0;
+            memset(bitvector, 0x00, bitvector_size * sizeof(*bitvector));
         }
 
-        std::set<int64_t>::iterator begin() { return indices.begin(); }
-        std::set<int64_t>::iterator end() { return indices.end(); }
+        int64_t *begin() {
+            qsort(list, list_len, sizeof(*list), index_compare);
+            return list;
+        }
+        int64_t *end() {
+            return list + list_len;
+        }
 };
 
 template <typename T>

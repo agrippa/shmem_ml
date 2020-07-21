@@ -130,8 +130,8 @@ int64_t* compute_bfs_roots(int &num_bfs_roots, int64_t nglobalverts,
 static unsigned nchanges;
 
 #ifdef ATOMICS_AS_MSGS
-ShmemML1DIndex changed_buf_0;
-ShmemML1DIndex changed_buf_1;
+ShmemML1DIndex *changed_buf_0 = NULL;
+ShmemML1DIndex *changed_buf_1 = NULL;
 ShmemML1DIndex *curr_changed = NULL;
 ShmemML1DIndex *next_changed = NULL;
 void verts_atomics_cb(ShmemML1D<int64_t>* verts, int64_t global_index, atomics_msg_op_t op,
@@ -183,6 +183,9 @@ int main(int argc, char **argv) {
         uint64_t seed1 = 2, seed2 = 3;
         uint_fast32_t seed[5];
         make_mrg_seed(seed1, seed2, seed);
+
+        changed_buf_0 = new ShmemML1DIndex(nvertices);
+        changed_buf_1 = new ShmemML1DIndex(nvertices);
 
         generate_kronecker_range(seed, SCALE, start_edge_index, end_edge_index,
                 edges.raw_slice());
@@ -390,8 +393,8 @@ int main(int argc, char **argv) {
         assert(visited);
 
         for (int root_index = 0; root_index < num_bfs_roots; root_index++) {
-            curr_changed = &changed_buf_0;
-            next_changed = &changed_buf_1;
+            curr_changed = changed_buf_0;
+            next_changed = changed_buf_1;
             curr_changed->clear();
             next_changed->clear();
 
