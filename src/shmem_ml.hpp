@@ -8,6 +8,7 @@
 #include <arrow/array.h>
 #include <arrow/array/builder_binary.h>
 #include <arrow/io/file.h>
+#include <set>
 
 #define ATOMICS_AS_MSGS
 
@@ -33,9 +34,29 @@ struct atomics_msg_t {
 };
 
 template<typename T>
-using atomics_msg_result_handler = void (*)(ShmemML1D<T>*, atomics_msg_op_t, T prev_val, T new_val);
+using atomics_msg_result_handler = void (*)(ShmemML1D<T>* arr,
+        int64_t global_index, atomics_msg_op_t, T prev_val, T new_val);
 
 #endif
+
+class ShmemML1DIndex {
+    private:
+        std::set<int64_t> indices;
+
+    public:
+        ShmemML1DIndex() { }
+
+        void add(int64_t i) {
+            indices.insert(i);
+        }
+
+        void clear() {
+            indices.clear();
+        }
+
+        std::set<int64_t>::iterator begin() { return indices.begin(); }
+        std::set<int64_t>::iterator end() { return indices.end(); }
+};
 
 template <typename T>
 class ShmemML1D {
@@ -153,6 +174,28 @@ class ShmemML1D {
             T* slice = raw_slice();
             for (int64_t i = 0; i < slice_size; i++) {
                 l(_local_slice_start + i, i, slice[i]);
+            }
+        }
+
+        template <typename lambda>
+        inline void apply_ip(ShmemML1DIndex& global_indices, lambda&& l) {
+            T* slice = raw_slice();
+            for (auto i = global_indices.begin(), e = global_indices.end();
+                    i != e; i++) {
+                int64_t global = *i;
+                int64_t local = global - _local_slice_start;
+                l(global, local, slice[local]);
+            }
+        }
+
+        template <typename lambda>
+        inline void apply_ip(ShmemML1DIndex* global_indices, lambda&& l) {
+            T* slice = raw_slice();
+            for (auto i = global_indices->begin(), e = global_indices->end();
+                    i != e; i++) {
+                int64_t global = *i;
+                int64_t local = global - _local_slice_start;
+                l(global, local, slice[local]);
             }
         }
 
@@ -323,7 +366,9 @@ class ShmemML1D {
                                 abort();
                         }
                         if (atomics_cb) {
-                            atomics_cb(this, msg->op, old_val, new_val);
+                            atomics_cb(this,
+                                    _local_slice_start + msg->local_index,
+                                    msg->op, old_val, new_val);
                         }
                     }
                 }

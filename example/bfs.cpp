@@ -130,9 +130,15 @@ int64_t* compute_bfs_roots(int &num_bfs_roots, int64_t nglobalverts,
 static unsigned nchanges;
 
 #ifdef ATOMICS_AS_MSGS
-void verts_atomics_cb(ShmemML1D<int64_t>* verts, atomics_msg_op_t op, int64_t prev_val, int64_t new_val) {
+ShmemML1DIndex changed_buf_0;
+ShmemML1DIndex changed_buf_1;
+ShmemML1DIndex *curr_changed = NULL;
+ShmemML1DIndex *next_changed = NULL;
+void verts_atomics_cb(ShmemML1D<int64_t>* verts, int64_t global_index, atomics_msg_op_t op,
+        int64_t prev_val, int64_t new_val) {
     if (op == CAS) {
         if (prev_val == INT64_MAX) {
+            next_changed->add(global_index);
             nchanges++;
         }
     }
@@ -384,11 +390,16 @@ int main(int argc, char **argv) {
         assert(visited);
 
         for (int root_index = 0; root_index < num_bfs_roots; root_index++) {
+            curr_changed = &changed_buf_0;
+            next_changed = &changed_buf_1;
+            curr_changed->clear();
+            next_changed->clear();
 
             int64_t root = bfs_roots[root_index];
             int root_pe = verts->owning_pe(root);
             if (root_pe == pe) {
                 verts->set(root, -(root + 1));
+                curr_changed->add(root);
             }
             visited->set(root);
 
@@ -403,43 +414,49 @@ int main(int argc, char **argv) {
             do {
                 nchanges = 0;
                 unsigned nattempts = 0;
-                verts->apply_ip([&verts, &neighbor_lists, &neighbor_list_offsets, &visited, &nattempts] (
+                verts->apply_ip(curr_changed,
+                    [&verts, &neighbor_lists, &neighbor_list_offsets, &visited, &nattempts] (
                         const int64_t global_index,
                         const int64_t local_index,
                         int64_t vert_parent) {
-                    if (vert_parent < 0) {
-                        int64_t parent = (-vert_parent) - 1;
-        
-                        int64_t *vert_neighbor_list = neighbor_lists +
-                            neighbor_list_offsets[local_index];
-                        int64_t vert_neighbor_list_len =
-                            neighbor_list_offsets[local_index + 1] -
-                            neighbor_list_offsets[local_index];
+                    assert(vert_parent < 0);
+                    int64_t parent = (-vert_parent) - 1;
+    
+                    int64_t *vert_neighbor_list = neighbor_lists +
+                        neighbor_list_offsets[local_index];
+                    int64_t vert_neighbor_list_len =
+                        neighbor_list_offsets[local_index + 1] -
+                        neighbor_list_offsets[local_index];
 
-                        for (int j = 0; j < vert_neighbor_list_len; j++) {
-                            int64_t neighbor = vert_neighbor_list[j];
-                            if (!visited->is_set(neighbor)) {
+                    for (int j = 0; j < vert_neighbor_list_len; j++) {
+                        int64_t neighbor = vert_neighbor_list[j];
+                        if (!visited->is_set(neighbor)) {
 #ifdef ATOMICS_AS_MSGS
-                                verts->atomic_cas_msg(neighbor, INT64_MAX,
-                                        -(global_index + 1));
+                            verts->atomic_cas_msg(neighbor, INT64_MAX,
+                                    -(global_index + 1));
 #else
-                                int64_t found_val = verts->atomic_cas(
-                                        neighbor, INT64_MAX,
-                                        -(global_index + 1));
-                                if (found_val == INT64_MAX) {
-                                    nchanges++;
-                                }
-#endif
-                                visited->set(neighbor);
+                            int64_t found_val = verts->atomic_cas(
+                                    neighbor, INT64_MAX,
+                                    -(global_index + 1));
+                            if (found_val == INT64_MAX) {
+                                nchanges++;
                             }
+#endif
+                            visited->set(neighbor);
                         }
-                        int64_t old = verts->atomic_cas(global_index,
-                                vert_parent, parent);
-                        assert(old == vert_parent);
-                        visited->set(global_index);
                     }
+                    int64_t old = verts->atomic_cas(global_index,
+                            vert_parent, parent);
+                    assert(old == vert_parent);
+                    visited->set(global_index);
                 });
+
                 verts->sync();
+
+                ShmemML1DIndex *tmp = curr_changed;
+                curr_changed = next_changed;
+                next_changed = tmp;
+                next_changed->clear();
 
                 changes.set_local(0, nchanges);
                 long long n_global_changes = changes.sum(0);
