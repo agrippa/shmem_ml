@@ -1,5 +1,5 @@
 CC=cc
-FLAGS=-g -O2 -Isrc -Wall -Wextra -std=c++11 -Isrc -Isrc/dlmalloc \
+FLAGS=-g -O3 -Isrc -Wall -Wextra -std=c++11 -Isrc -Isrc/dlmalloc \
 	  -I$(ARROW_HOME)/include -DMSPACES=1 -DONLY_MSPACES=1 \
 	  -DHAVE_MORECORE=0 -DHAVE_MMAP=0 -DHAVE_MREMAP=0 -DUSE_LOCKS=0 \
 	  -DFOOTERS=1 -no-inline-max-size -no-inline-max-total-size
