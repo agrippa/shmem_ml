@@ -15,7 +15,7 @@
 #define SHMEMML_MAX(_a, _b) (((_a) > (_b)) ? (_a) : (_b))
 
 #ifdef ATOMICS_AS_MSGS
-#define MAX_BUFFERED_ATOMICS 1024
+#define MAX_BUFFERED_ATOMICS 4096
 
 template <typename T>
 class ShmemML1D;
