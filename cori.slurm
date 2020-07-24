@@ -18,7 +18,11 @@ echo $SLURM_NODELIST
 echo
 echo "Running with OpenSHMEM installation at $OPENSHMEM_INSTALL"
 
+source ~/.bashrc.ext
+setup_shmem
+
 export LD_LIBRARY_PATH=$ARROW_HOME/lib64:$LD_LIBRARY_PATH
+export LD_LIBRARY_PATH=$OPENSHMEM_HOME/lib64:$LD_LIBRARY_PATH
 
 # 2 sockets x 16 cores per socket for Cori Haswell
 export CORES_PER_SOCKET=16
@@ -37,8 +41,7 @@ echo
 # srun $SLURM_ARGS $HOME/shmem_ml/bin/save_load_get_set
 # echo
 echo "bfs"
-# for REPEAT in {1..3}; do
-    srun $SLURM_ARGS $HOME/shmem_ml/bin/bfs $SCRATCH/job.$SLURM_JOB_ID/edges.bin 5 26
-    echo
-# done
+# srun $SLURM_ARGS $HOME/shmem_ml/bin/bfs $SCRATCH/job.$SLURM_JOB_ID/edges.bin 5 26
+srun $SLURM_ARGS $HOME/shmem_ml/bin/bfs $SCRATCH/job.$SLURM_JOB_ID/edges.bin 1 26
+echo
 
