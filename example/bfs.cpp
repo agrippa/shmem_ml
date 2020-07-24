@@ -157,7 +157,10 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    shmem_init();
+    int tl;
+    int err = shmem_init_thread(SHMEM_THREAD_SINGLE, &tl);
+    assert(tl == SHMEM_THREAD_SINGLE);
+
     int pe = shmem_my_pe();
     int npes = shmem_n_pes();
     is_isolated = (int*)shmem_malloc(sizeof(*is_isolated));

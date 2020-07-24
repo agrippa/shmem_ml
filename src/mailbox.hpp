@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <stdlib.h>
+#include <shmem.h>
 
 typedef struct _mailbox_t {
     uint64_t *indices;
@@ -10,6 +11,7 @@ typedef struct _mailbox_t {
     uint32_t capacity_in_bytes;
     char *buf;
     int pe;
+    shmem_ctx_t *ctxs;
 } mailbox_t;
 
 /*
