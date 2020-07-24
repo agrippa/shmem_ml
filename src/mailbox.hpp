@@ -5,6 +5,12 @@
 #include <stdlib.h>
 #include <shmem.h>
 
+#define USE_CRC
+#ifdef USE_CRC
+#define CRC32
+#include "crc.h"
+#endif
+
 typedef struct _mailbox_t {
     uint64_t *indices;
     uint64_t indices_curr_val;
@@ -13,6 +19,14 @@ typedef struct _mailbox_t {
     int pe;
     shmem_ctx_t *ctxs;
 } mailbox_t;
+
+typedef struct _mailbox_msg_header_t {
+#ifdef USE_CRC
+    crc msg_len_crc;
+    crc msg_crc;
+#endif
+    size_t msg_len;
+} mailbox_msg_header_t;
 
 /*
  * A symmetric call that allocates a remotely accessible mailbox data structure
@@ -26,7 +40,7 @@ void mailbox_init(mailbox_t *mailbox, size_t capacity_in_bytes);
  * space, or infinitely if max_tries is set to -1. Returns 1 if the send
  * succeeds, 0 otherwise.
  */
-int mailbox_send(const void *msg, size_t msg_len, int target_pe,
+int mailbox_send(mailbox_msg_header_t *msg, size_t msg_len, int target_pe,
         int max_tries, mailbox_t *mailbox);
 
 /*
@@ -38,5 +52,7 @@ int mailbox_recv(void *msg, size_t msg_capacity, size_t *msg_len,
         mailbox_t *mailbox);
 
 void mailbox_destroy(mailbox_t *mailbox);
+
+mailbox_msg_header_t* mailbox_allocate_msg(size_t max_msg_len);
 
 #endif // _HVR_MAILBOX

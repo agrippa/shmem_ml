@@ -11,7 +11,7 @@ typedef struct _mailbox_buffer_t {
 
     unsigned *nbuffered_per_pe;
 
-    char *buffers;
+    mailbox_msg_header_t** buffers;
 } mailbox_buffer_t;
 
 void mailbox_buffer_init(mailbox_buffer_t *buf, mailbox_t *mbox,
