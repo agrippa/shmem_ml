@@ -35,6 +35,13 @@ void mailbox_init(mailbox_t *mailbox, size_t capacity_in_bytes) {
 
     mailbox->pe = shmem_my_pe();
 
+    mailbox->ctxs = (shmem_ctx_t*)malloc(shmem_n_pes() * sizeof(mailbox->ctxs[0]));
+    assert(mailbox->ctxs);
+    for (int p = 0; p < shmem_n_pes(); p++) {
+        int err = shmem_ctx_create(0, mailbox->ctxs + p);
+        assert(err == 0);
+    }
+
 #ifdef USE_CRC
     crcInit();
 #endif
@@ -78,14 +85,15 @@ static void clear_mailbox_with_rotation(size_t data_len,
 }
 
 static void put_in_mailbox_with_rotation(const void *data, size_t data_len,
-        uint64_t starting_offset, mailbox_t *mailbox, int target_pe) {
+        uint64_t starting_offset, mailbox_t *mailbox, int target_pe,
+        shmem_ctx_t ctx) {
     if (starting_offset + data_len <= mailbox->capacity_in_bytes) {
-        shmem_putmem(mailbox->buf + starting_offset, data, data_len, target_pe);
+        shmem_ctx_putmem(ctx, mailbox->buf + starting_offset, data, data_len, target_pe);
     } else {
         uint64_t rotate_index = mailbox->capacity_in_bytes - starting_offset;
-        shmem_putmem(mailbox->buf + starting_offset, data, rotate_index,
+        shmem_ctx_putmem(ctx, mailbox->buf + starting_offset, data, rotate_index,
                 target_pe);
-        shmem_putmem(mailbox->buf, (char *)data + rotate_index,
+        shmem_ctx_putmem(ctx, mailbox->buf, (char *)data + rotate_index,
                 data_len - rotate_index, target_pe);
     }
 }
@@ -118,7 +126,8 @@ int mailbox_send(const void *msg, size_t msg_len, int target_pe,
 #endif
     assert(full_msg_len < mailbox->capacity_in_bytes);
 
-    uint64_t indices = shmem_uint64_atomic_fetch(mailbox->indices, target_pe);
+    shmem_ctx_t ctx = mailbox->ctxs[target_pe];
+    uint64_t indices = shmem_ctx_uint64_atomic_fetch(ctx, mailbox->indices, target_pe);
     uint32_t start_send_index = 0;
 
     unsigned tries = 0;
@@ -138,7 +147,7 @@ int mailbox_send(const void *msg, size_t msg_len, int target_pe,
             uint32_t new_write_index = (write_index + full_msg_len) %
                 mailbox->capacity_in_bytes;
             uint64_t new_val = pack_indices(read_index, new_write_index);
-            uint64_t old = shmem_uint64_atomic_compare_swap(mailbox->indices,
+            uint64_t old = shmem_ctx_uint64_atomic_compare_swap(ctx, mailbox->indices,
                     indices, new_val, target_pe);
             if (old == indices) {
                 // Successful
@@ -148,7 +157,7 @@ int mailbox_send(const void *msg, size_t msg_len, int target_pe,
                 indices = old;
             }
         } else {
-            indices = shmem_uint64_atomic_fetch(mailbox->indices, target_pe);
+            indices = shmem_ctx_uint64_atomic_fetch(ctx, mailbox->indices, target_pe);
         }
         tries++;
     }
@@ -178,19 +187,19 @@ int mailbox_send(const void *msg, size_t msg_len, int target_pe,
     msg_offset = (msg_offset + 2 * sizeof(crc)) % mailbox->capacity_in_bytes;
 
     put_in_mailbox_with_rotation(&msg_len_crc, sizeof(msg_len_crc),
-            msg_len_crc_offset, mailbox, target_pe);
+            msg_len_crc_offset, mailbox, target_pe, ctx);
     put_in_mailbox_with_rotation(&msg_crc, sizeof(msg_crc),
-            msg_crc_offset, mailbox, target_pe);
+            msg_crc_offset, mailbox, target_pe, ctx);
 #endif
 
     put_in_mailbox_with_rotation(&msg_len, sizeof(msg_len), msg_len_offset,
-            mailbox, target_pe);
-    put_in_mailbox_with_rotation(msg, msg_len, msg_offset, mailbox, target_pe);
+            mailbox, target_pe, ctx);
+    put_in_mailbox_with_rotation(msg, msg_len, msg_offset, mailbox, target_pe, ctx);
 
-    shmem_quiet();
+    shmem_ctx_quiet(ctx);
 
     put_in_mailbox_with_rotation(&sentinel, sizeof(sentinel),
-            start_send_offset, mailbox, target_pe);
+            start_send_offset, mailbox, target_pe, ctx);
     return 1;
 }
 
@@ -291,7 +300,7 @@ int mailbox_recv(void *msg, size_t msg_capacity, size_t *msg_len,
 #endif
     shmem_quiet();
     put_in_mailbox_with_rotation(&clear_sentinel, sizeof(clear_sentinel),
-            start_msg_offset, mailbox, mailbox->pe);
+            start_msg_offset, mailbox, mailbox->pe, SHMEM_CTX_DEFAULT);
     // shmem_fence();
     shmem_quiet();
 
@@ -324,4 +333,9 @@ int mailbox_recv(void *msg, size_t msg_capacity, size_t *msg_len,
 void mailbox_destroy(mailbox_t *mailbox) {
     shmem_free(mailbox->indices);
     shmem_free(mailbox->buf);
+
+    for (int p = 0; p < shmem_n_pes(); p++) {
+        shmem_ctx_destroy(mailbox->ctxs[p]);
+    }
+    free(mailbox->ctxs);
 }
