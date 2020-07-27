@@ -119,6 +119,11 @@ mailbox_msg_header_t* mailbox_allocate_msg(size_t max_msg_len) {
     return msg;
 }
 
+void mailbox_sync(int pe, mailbox_t *mailbox) {
+    shmem_ctx_t ctx = mailbox->ctxs[pe];
+    shmem_ctx_quiet(ctx);
+}
+
 int mailbox_send(mailbox_msg_header_t *msg, size_t msg_len, int target_pe,
         int max_tries, mailbox_t *mailbox) {
     // So that sentinel values are always cohesive

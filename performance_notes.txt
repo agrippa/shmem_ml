@@ -1,0 +1,61 @@
+Results using OpenSHMEMX
+
+4 nodes
+scale=26
+messages
+Completed root 0 in 2.635150 s
+
+----------------------------------------
+----------------------------------------
+----------------------------------------
+
+Results using Cray OpenSHMEM
+
+8 nodes
+scale=26
+atomics
+Completed root 0 in 16.633511 s
+Completed root 1 in 8.329259 s
+Completed root 2 in 8.528514 s
+Completed root 3 in 9.151535 s
+Completed root 4 in 9.637988 s
+
+16 nodes
+scale=26
+atomics
+Completed root 0 in 6.531717 s
+Completed root 1 in 5.905236 s
+Completed root 2 in 4.382438 s
+Completed root 3 in 9.295218 s
+Completed root 4 in 5.080626 s
+
+------------------------------
+
+4 nodes
+scale=26
+messages
+Completed root 0 in 1.963342 s
+Completed root 1 in 1.815744 s
+Completed root 2 in 1.376106 s
+Completed root 3 in 1.423141 s
+Completed root 4 in 1.700615 s
+
+
+8 nodes
+scale=26
+messages
+Completed root 0 in 1.139687 s
+Completed root 1 in 0.893737 s
+Completed root 2 in 0.925285 s
+Completed root 3 in 0.918525 s
+Completed root 4 in 1.172836 s
+
+16 nodes
+scale=26
+messages
+Completed root 0 in 0.712910 s
+Completed root 1 in 0.715021 s
+Completed root 2 in 0.699444 s
+Completed root 3 in 0.704628 s
+Completed root 4 in 0.728442 s
+

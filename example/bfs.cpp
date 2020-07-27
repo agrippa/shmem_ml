@@ -12,6 +12,8 @@ extern "C" {
 #include <generator/utils.h>
 
 #include <cstdlib>
+#include <pthread.h>
+#include <unistd.h>
 
 #ifdef CRAYPAT
 #include <pat_api.h>
@@ -127,6 +129,20 @@ int64_t* compute_bfs_roots(int &num_bfs_roots, int64_t nglobalverts,
     return bfs_roots;
 }
 
+static void *aborting_thread(void *user_data) {
+    int nseconds = 600;
+
+    const unsigned long long start = shmem_ml_current_time_us();
+    while (shmem_ml_current_time_us() - start < nseconds * 1000000) {
+        sleep(10);
+    }
+
+    fprintf(stderr, "BFS forcibly aborting\n");
+    abort(); // Get a core dump
+
+    return NULL;
+}
+
 static unsigned nchanges;
 
 #ifdef ATOMICS_AS_MSGS
@@ -170,6 +186,13 @@ int main(int argc, char **argv) {
     for (int i = 0; i < SHMEM_BCAST_SYNC_SIZE; i++) {
         psync[i] = SHMEM_SYNC_VALUE;
     }
+
+#if 0
+    pthread_t aborting_pthread;
+    const int pthread_err = pthread_create(&aborting_pthread, NULL,
+            aborting_thread, NULL);
+    assert(pthread_err == 0);
+#endif
 
     {
         unsigned long long start_setup = shmem_ml_current_time_us();

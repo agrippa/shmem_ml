@@ -55,4 +55,6 @@ void mailbox_destroy(mailbox_t *mailbox);
 
 mailbox_msg_header_t* mailbox_allocate_msg(size_t max_msg_len);
 
+void mailbox_sync(int pe, mailbox_t *mailbox);
+
 #endif // _HVR_MAILBOX
