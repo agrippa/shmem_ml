@@ -42,7 +42,7 @@ echo
 # echo
 echo "bfs"
 # srun $SLURM_ARGS $HOME/shmem_ml/bin/bfs $SCRATCH/job.$SLURM_JOB_ID/edges.bin 5 26
-srun $SLURM_ARGS $HOME/shmem_ml/bin/bfs+pat $SCRATCH/job.$SLURM_JOB_ID/edges.bin 1 26
+srun $SLURM_ARGS $HOME/shmem_ml/bin/bfs $SCRATCH/job.$SLURM_JOB_ID/edges.bin 1 26
 # srun --ntasks=$(($SLURM_NNODES * $CORES_PER_NODE)) $HOME/shmem_ml/tmp
 echo
 
