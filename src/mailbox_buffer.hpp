@@ -7,7 +7,9 @@ typedef struct _mailbox_header_wrapper_t {
     int pe;
     struct _mailbox_header_wrapper_t *next;
     struct _mailbox_header_wrapper_t *prev;
+
     struct _mailbox_msg_header_t *msg;
+    shmem_ctx_t ctx;
 } mailbox_header_wrapper_t;
 
 typedef struct _mailbox_buffer_t {

@@ -3,7 +3,7 @@
 #SBATCH -p debug
 #SBATCH -N 4
 #SBATCH -C haswell
-#SBATCH -t 00:20:00
+#SBATCH -t 00:10:00
 #SBATCH -J SHMEM_ML
 #SBATCH --exclusive
 #SBATCH --contiguous
@@ -21,6 +21,8 @@ echo "Running with OpenSHMEM installation at $OPENSHMEM_INSTALL"
 source ~/.bashrc.ext
 setup_shmem
 
+# module list
+
 export LD_LIBRARY_PATH=$ARROW_HOME/lib64:$LD_LIBRARY_PATH
 export LD_LIBRARY_PATH=$OPENSHMEM_HOME/lib64:$LD_LIBRARY_PATH
 
@@ -30,6 +32,8 @@ export SOCKETS_PER_NODE=2
 export CORES_PER_NODE=$(($SOCKETS_PER_NODE * $CORES_PER_SOCKET))
 export SHMEM_SYMMETRIC_SIZE=$((2 * 1024 * 1024 * 1024))
 export SHMEM_ML_POOL_SIZE=$((1 * 1024 * 1024 * 1024 + 512 * 1024 * 1024))
+export PAT_RT_PERFCTR_MPX=1
+export SHMEM_MAX_CTX=1
 
 mkdir -p $SCRATCH/job.$SLURM_JOB_ID
 cd $SCRATCH/job.$SLURM_JOB_ID
@@ -42,7 +46,7 @@ echo
 # echo
 echo "bfs"
 # srun $SLURM_ARGS $HOME/shmem_ml/bin/bfs $SCRATCH/job.$SLURM_JOB_ID/edges.bin 5 26
-srun $SLURM_ARGS $HOME/shmem_ml/bin/bfs $SCRATCH/job.$SLURM_JOB_ID/edges.bin 1 26
 # srun --ntasks=$(($SLURM_NNODES * $CORES_PER_NODE)) $HOME/shmem_ml/tmp
+srun $SLURM_ARGS $HOME/shmem_ml/bin/bfs $SCRATCH/job.$SLURM_JOB_ID/edges.bin 1 26
 echo
 

@@ -28,13 +28,17 @@ void mailbox_buffer_init(mailbox_buffer_t *buf, mailbox_t *mbox,
     buf->free_pool = NULL;
 
     for (int i = 0; i < buffer_pool_size; i++) {
-        mailbox_msg_header_t *msg = mailbox_allocate_msg(buffer_size_per_pe * msg_size);
-        mailbox_header_wrapper_t *wrapper = (mailbox_header_wrapper_t*)malloc(sizeof(*wrapper));
+        shmem_ctx_t ctx;
+        mailbox_msg_header_t *msg = mailbox_allocate_msg(
+                buffer_size_per_pe * msg_size, &ctx);
+        mailbox_header_wrapper_t *wrapper = (mailbox_header_wrapper_t*)malloc(
+                sizeof(*wrapper));
         assert(wrapper);
 
         wrapper->next = buf->free_pool;
         wrapper->prev = NULL;
         wrapper->msg = msg;
+        wrapper->ctx = ctx;
         if (buf->free_pool) buf->free_pool->prev = wrapper;
         buf->free_pool = wrapper;
     }
@@ -43,7 +47,7 @@ void mailbox_buffer_init(mailbox_buffer_t *buf, mailbox_t *mbox,
 static mailbox_header_wrapper_t* pop_pending_buffer(mailbox_buffer_t *buf) {
     mailbox_header_wrapper_t* msg = buf->pending_pool_head;
     assert(msg);
-    mailbox_sync(msg->pe, buf->mbox);
+    mailbox_sync(msg->ctx, buf->mbox);
 
     buf->pending_pool_head = msg->next;
     if (buf->pending_pool_head) {
@@ -104,8 +108,8 @@ int mailbox_buffer_send(const void *msg, size_t msg_len, int target_pe,
         assert(pe_buf);
 
         // flush
-        int success = mailbox_send(pe_buf->msg, nbuffered * buf->msg_size,
-                target_pe, max_tries, buf->mbox);
+        int success = mailbox_send(pe_buf->msg, pe_buf->ctx,
+                nbuffered * buf->msg_size, target_pe, max_tries, buf->mbox);
         if (success) {
             buf->nbuffered_per_pe[target_pe] = 0;
             add_pending_buffer(pe_buf, buf);
@@ -137,8 +141,8 @@ int mailbox_buffer_flush(mailbox_buffer_t *buf, int max_tries) {
             unsigned count_loops = 0;
             int printed_warning = 0;
 
-            int success = mailbox_send(pe_buf->msg, nbuffered * buf->msg_size,
-                    p, max_tries, buf->mbox);
+            int success = mailbox_send(pe_buf->msg, pe_buf->ctx,
+                    nbuffered * buf->msg_size, p, max_tries, buf->mbox);
             if (success) {
                 buf->nbuffered_per_pe[p] = 0;
                 add_pending_buffer(pe_buf, buf);

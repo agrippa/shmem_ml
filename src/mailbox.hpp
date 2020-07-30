@@ -17,7 +17,6 @@ typedef struct _mailbox_t {
     uint32_t capacity_in_bytes;
     char *buf;
     int pe;
-    shmem_ctx_t *ctxs;
 } mailbox_t;
 
 typedef struct _mailbox_msg_header_t {
@@ -40,8 +39,8 @@ void mailbox_init(mailbox_t *mailbox, size_t capacity_in_bytes);
  * space, or infinitely if max_tries is set to -1. Returns 1 if the send
  * succeeds, 0 otherwise.
  */
-int mailbox_send(mailbox_msg_header_t *msg, size_t msg_len, int target_pe,
-        int max_tries, mailbox_t *mailbox);
+int mailbox_send(mailbox_msg_header_t *msg, shmem_ctx_t ctx, size_t msg_len,
+        int target_pe, int max_tries, mailbox_t *mailbox);
 
 /*
  * Check my local mailbox for a new message. If one is found, a pointer to it is
@@ -53,8 +52,9 @@ int mailbox_recv(void *msg, size_t msg_capacity, size_t *msg_len,
 
 void mailbox_destroy(mailbox_t *mailbox);
 
-mailbox_msg_header_t* mailbox_allocate_msg(size_t max_msg_len);
+mailbox_msg_header_t* mailbox_allocate_msg(size_t max_msg_len,
+        shmem_ctx_t *out_ctx);
 
-void mailbox_sync(int pe, mailbox_t *mailbox);
+void mailbox_sync(shmem_ctx_t ctx, mailbox_t *mailbox);
 
 #endif // _HVR_MAILBOX

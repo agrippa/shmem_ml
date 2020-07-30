@@ -19,6 +19,8 @@ extern "C" {
 #include <pat_api.h>
 #endif
 
+// #define SHARED_VISITED
+
 static int *is_isolated = NULL;
 static long *psync = NULL;
 
@@ -173,9 +175,21 @@ int main(int argc, char **argv) {
         return 1;
     }
 
+#if 0
     int tl;
     int err = shmem_init_thread(SHMEM_THREAD_SINGLE, &tl);
+    assert(err == 0);
     assert(tl == SHMEM_THREAD_SINGLE);
+    // if (tl != SHMEM_THREAD_SINGLE) {
+    //     fprintf(stderr, "Error: requested single but got %s (%d)\n",
+    //             tl == SHMEM_THREAD_FUNNELED ? "funneled" :
+    //             (tl == SHMEM_THREAD_SERIALIZED ? "serialized" :
+    //              (tl == SHMEM_THREAD_MULTIPLE ? "multiple" : "unknown")), tl);
+    //     exit(1);
+    // }
+#else
+    shmem_init();
+#endif
 
     int pe = shmem_my_pe();
     int npes = shmem_n_pes();
@@ -497,9 +511,11 @@ int main(int argc, char **argv) {
                 any_changes = (n_global_changes > 0);
                 iter++;
 
+#ifdef SHARED_VISITED
                 if (any_changes) {
                     visited->sync();
                 }
+#endif
             } while(any_changes);
 
 #ifdef CRAYPAT

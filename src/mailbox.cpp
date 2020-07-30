@@ -28,13 +28,6 @@ void mailbox_init(mailbox_t *mailbox, size_t capacity_in_bytes) {
 
     mailbox->pe = shmem_my_pe();
 
-    mailbox->ctxs = (shmem_ctx_t*)malloc(shmem_n_pes() * sizeof(mailbox->ctxs[0]));
-    assert(mailbox->ctxs);
-    for (int p = 0; p < shmem_n_pes(); p++) {
-        int err = shmem_ctx_create(0, mailbox->ctxs + p);
-        assert(err == 0);
-    }
-
 #ifdef USE_CRC
     crcInit();
 #endif
@@ -105,20 +98,29 @@ static void get_from_mailbox_with_rotation(uint64_t starting_offset, void *data,
     }
 }
 
-mailbox_msg_header_t* mailbox_allocate_msg(size_t max_msg_len) {
+mailbox_msg_header_t* mailbox_allocate_msg(size_t max_msg_len,
+        shmem_ctx_t *out_ctx) {
     mailbox_msg_header_t* msg = (mailbox_msg_header_t*)malloc(
             sizeof(*msg) + max_msg_len);
     assert(msg);
+
+    int err = shmem_ctx_create(0, out_ctx);
+    assert(err == 0);
+
     return msg;
 }
 
-void mailbox_sync(int pe, mailbox_t *mailbox) {
-    shmem_ctx_t ctx = mailbox->ctxs[pe];
+void mailbox_deallocate_msg(mailbox_msg_header_t* msg, shmem_ctx_t ctx) {
+    free(msg);
+    shmem_ctx_destroy(ctx);
+}
+
+void mailbox_sync(shmem_ctx_t ctx, mailbox_t *mailbox) {
     shmem_ctx_quiet(ctx);
 }
 
-int mailbox_send(mailbox_msg_header_t *msg, size_t msg_len, int target_pe,
-        int max_tries, mailbox_t *mailbox) {
+int mailbox_send(mailbox_msg_header_t *msg, shmem_ctx_t ctx, size_t msg_len,
+        int target_pe, int max_tries, mailbox_t *mailbox) {
     // So that sentinel values are always cohesive
 
     uint64_t full_msg_len = sizeof(*msg) + msg_len;
@@ -133,7 +135,6 @@ int mailbox_send(mailbox_msg_header_t *msg, size_t msg_len, int target_pe,
 
     assert(full_msg_len < mailbox->capacity_in_bytes);
 
-    shmem_ctx_t ctx = mailbox->ctxs[target_pe];
     uint64_t indices = shmem_ctx_uint64_atomic_fetch(ctx, mailbox->indices, target_pe);
     uint32_t start_send_index = 0;
 
@@ -266,14 +267,4 @@ int mailbox_recv(void *msg, size_t msg_capacity, size_t *msg_len,
     mailbox->indices_curr_val = new_indices;
 
     return 1;
-}
-
-void mailbox_destroy(mailbox_t *mailbox) {
-    shmem_free(mailbox->indices);
-    shmem_free(mailbox->buf);
-
-    for (int p = 0; p < shmem_n_pes(); p++) {
-        shmem_ctx_destroy(mailbox->ctxs[p]);
-    }
-    free(mailbox->ctxs);
 }
