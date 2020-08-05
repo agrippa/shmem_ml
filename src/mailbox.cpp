@@ -7,10 +7,8 @@
 
 #include "mailbox.hpp"
 
-#ifdef USE_CRC
 #define CRC32
 #include "crc.c"
-#endif
 
 void mailbox_init(mailbox_t *mailbox, size_t capacity_in_bytes) {
     memset(mailbox, 0x00, sizeof(*mailbox));
@@ -28,9 +26,7 @@ void mailbox_init(mailbox_t *mailbox, size_t capacity_in_bytes) {
 
     mailbox->pe = shmem_my_pe();
 
-#ifdef USE_CRC
     crcInit();
-#endif
 
     shmem_barrier_all();
 }
@@ -124,13 +120,11 @@ int mailbox_send(mailbox_msg_header_t *msg, shmem_ctx_t ctx, size_t msg_len,
     // So that sentinel values are always cohesive
 
     uint64_t full_msg_len = sizeof(*msg) + msg_len;
-#ifdef USE_CRC
     // Hash the length of the message
     msg->msg_len_crc = crcFast((const unsigned char *)&msg_len,
             sizeof(msg_len));
     // Hash the message itself
     msg->msg_crc = crcFast((const unsigned char *)(msg + 1), msg_len);
-#endif
     msg->msg_len = msg_len;
 
     assert(full_msg_len < mailbox->capacity_in_bytes);
@@ -223,7 +217,6 @@ int mailbox_recv(void *msg, size_t msg_capacity, size_t *msg_len,
     get_from_mailbox_with_rotation(header_offset, &header, sizeof(header),
             mailbox);
 
-#ifdef USE_CRC
     crc calc_msg_len_crc = crcFast((const unsigned char *)&header.msg_len,
             sizeof(header.msg_len));
     if (calc_msg_len_crc != header.msg_len_crc) {
@@ -240,7 +233,6 @@ int mailbox_recv(void *msg, size_t msg_capacity, size_t *msg_len,
         // Checksums for message don't match
         return 0;
     }
-#endif
 
     /*
      * Once we've finished extracting the message, clear the checksums to make

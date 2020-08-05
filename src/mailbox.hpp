@@ -5,11 +5,8 @@
 #include <stdlib.h>
 #include <shmem.h>
 
-#define USE_CRC
-#ifdef USE_CRC
 #define CRC32
 #include "crc.h"
-#endif
 
 typedef struct _mailbox_t {
     uint64_t *indices;
@@ -20,10 +17,8 @@ typedef struct _mailbox_t {
 } mailbox_t;
 
 typedef struct _mailbox_msg_header_t {
-#ifdef USE_CRC
     crc msg_len_crc;
     crc msg_crc;
-#endif
     size_t msg_len;
 } mailbox_msg_header_t;
 
