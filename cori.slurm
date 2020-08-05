@@ -1,9 +1,9 @@
 #!/bin/bash -l
 
 #SBATCH -p debug
-#SBATCH -N 4
+#SBATCH -N 8
 #SBATCH -C haswell
-#SBATCH -t 00:10:00
+#SBATCH -t 00:20:00
 #SBATCH -J SHMEM_ML
 #SBATCH --exclusive
 #SBATCH --contiguous
@@ -30,8 +30,8 @@ export LD_LIBRARY_PATH=$OPENSHMEM_HOME/lib64:$LD_LIBRARY_PATH
 export CORES_PER_SOCKET=16
 export SOCKETS_PER_NODE=2
 export CORES_PER_NODE=$(($SOCKETS_PER_NODE * $CORES_PER_SOCKET))
-export SHMEM_SYMMETRIC_SIZE=$((2 * 1024 * 1024 * 1024))
-export SHMEM_ML_POOL_SIZE=$((1 * 1024 * 1024 * 1024 + 512 * 1024 * 1024))
+export SHMEM_SYMMETRIC_SIZE=$((1 * 1024 * 1024 * 1024))
+export SHMEM_ML_POOL_SIZE=$((512 * 1024 * 1024))
 export PAT_RT_PERFCTR_MPX=1
 export SHMEM_MAX_CTX=1
 
@@ -46,7 +46,8 @@ echo
 # echo
 echo "bfs"
 # srun $SLURM_ARGS $HOME/shmem_ml/bin/bfs $SCRATCH/job.$SLURM_JOB_ID/edges.bin 5 26
-# srun --ntasks=$(($SLURM_NNODES * $CORES_PER_NODE)) $HOME/shmem_ml/tmp
-srun $SLURM_ARGS $HOME/shmem_ml/bin/bfs $SCRATCH/job.$SLURM_JOB_ID/edges.bin 1 26
+# srun --ntasks=$(($SLURM_NNODES * $CORES_PER_NODE)) $HOME/shmem_ml/tmp+pat
+sbcast --compress=lz4 $HOME/shmem_ml/bin/bfs /tmp/bfs
+srun $SLURM_ARGS /tmp/bfs $SCRATCH/job.$SLURM_JOB_ID/edges.bin 1 26
 echo
 
