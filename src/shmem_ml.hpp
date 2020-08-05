@@ -127,7 +127,7 @@ class ShmemML1D {
             mailbox_init(&atomics_mailbox, 32 * 1024 * 1024);
             mailbox_buffer_init(&atomics_mailbox_buffer, &atomics_mailbox,
                     npes, sizeof(atomics_msg_t<T>), MAX_BUFFERED_ATOMICS,
-                    256);
+                    npes < 256 ? 256 : npes);
             buffered_atomics = (atomics_msg_t<T>*)malloc(
                     MAX_BUFFERED_ATOMICS * sizeof(*buffered_atomics));
             assert(buffered_atomics);

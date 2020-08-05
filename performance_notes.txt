@@ -1,9 +1,16 @@
 Results using OpenSHMEMX
 
-4 nodes
-scale=26
-messages
-Completed root 0 in 2.635150 s
+nodes=4 scale=26 messages
+Completed root 0 in 2.896912 s
+
+nodes=8 scale=26 messages
+Completed root 0 in 1.809267 s
+
+nodes=16 scale=26 messages
+Completed root 0 in 1.604047 s
+
+nodes=32 scale=26 messages
+Completed root 0 in 1.220184 s
 
 ----------------------------------------
 ----------------------------------------

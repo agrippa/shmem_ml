@@ -1,9 +1,9 @@
 #!/bin/bash -l
 
 #SBATCH -p debug
-#SBATCH -N 8
+#SBATCH -N 32
 #SBATCH -C haswell
-#SBATCH -t 00:20:00
+#SBATCH -t 00:10:00
 #SBATCH -J SHMEM_ML
 #SBATCH --exclusive
 #SBATCH --contiguous
@@ -16,7 +16,7 @@ ulimit -c unlimited
 echo "Running on:"
 echo $SLURM_NODELIST
 echo
-echo "Running with OpenSHMEM installation at $OPENSHMEM_INSTALL"
+echo "Running with OpenSHMEM installation at $OPENSHMEM_HOME"
 
 source ~/.bashrc.ext
 setup_shmem
