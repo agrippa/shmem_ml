@@ -3,6 +3,7 @@
 
 #include "ShmemMemoryPool.hpp"
 #include "shmem_ml.hpp"
+#include <numpy/arrayobject.h>
 
 unsigned long long shmem_ml_current_time_us() {
     struct timespec monotime;
@@ -109,5 +110,21 @@ void ReplicatedShmemML1D<unsigned>::reduce_all_or() {
     shmem_int_or_to_all((int*)this->raw_slice(), (int*)this->raw_slice(), _replicated_N, 0, 0,
             shmem_n_pes(), (int*)pwork, psync);
     shmem_barrier_all();
+}
+
+// https://stackoverflow.com/questions/52074167/import-array-error-while-embedding-python-and-numpy-to-c
+// static void* ugly_workaround() {
+//     import_array();
+//     return NULL;
+// }
+
+void shmem_ml_init() {
+    shmem_init();
+    // ugly_workaround();
+    arrow::py::import_pyarrow();
+}
+
+void shmem_ml_finalize() {
+    shmem_finalize();
 }
 

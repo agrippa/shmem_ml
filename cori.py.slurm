@@ -1,10 +1,10 @@
 #!/bin/bash -l
 
 #SBATCH -p debug
-#SBATCH -N 4
+#SBATCH -N 1
 #SBATCH -C haswell
-#SBATCH -t 00:10:00
-#SBATCH -J SHMEM_ML
+#SBATCH -t 00:02:00
+#SBATCH -J SHMEM_ML_PY
 #SBATCH --exclusive
 #SBATCH --contiguous
 #SBATCH --mail-type=ALL
@@ -40,14 +40,6 @@ cd $SCRATCH/job.$SLURM_JOB_ID
 
 export SLURM_ARGS="--ntasks=$(($SLURM_NNODES * $CORES_PER_NODE)) --ntasks-per-socket=$CORES_PER_SOCKET --cpus-per-task=1"
 
+export PYTHONPATH=$HOME/shmem_ml:$PYTHONPATH
 echo
-# echo "save_load_get_set"
-# srun $SLURM_ARGS $HOME/shmem_ml/bin/save_load_get_set
-# echo
-echo "bfs"
-# srun $SLURM_ARGS $HOME/shmem_ml/bin/bfs $SCRATCH/job.$SLURM_JOB_ID/edges.bin 5 26
-# srun --ntasks=$(($SLURM_NNODES * $CORES_PER_NODE)) $HOME/shmem_ml/tmp+pat
-sbcast --compress=lz4 $HOME/shmem_ml/bin/bfs /tmp/bfs
-srun $SLURM_ARGS /tmp/bfs $SCRATCH/job.$SLURM_JOB_ID/edges.bin 1 26
-echo
-
+srun --ntasks=2 python $HOME/shmem_ml/example/python_wrapper.py

@@ -8,7 +8,7 @@
 void mailbox_buffer_init(mailbox_buffer_t *buf, mailbox_t *mbox,
         int npes, size_t msg_size, size_t buffer_size_per_pe,
         size_t buffer_pool_size) {
-    assert(buffer_pool_size >= npes);
+    assert(buffer_pool_size >= (size_t)npes);
     buf->mbox = mbox;
     buf->npes = npes;
     buf->msg_size = msg_size;
@@ -27,7 +27,7 @@ void mailbox_buffer_init(mailbox_buffer_t *buf, mailbox_t *mbox,
     buf->pending_pool_tail = NULL;
     buf->free_pool = NULL;
 
-    for (int i = 0; i < buffer_pool_size; i++) {
+    for (unsigned i = 0; i < buffer_pool_size; i++) {
         shmem_ctx_t ctx;
         mailbox_msg_header_t *msg = mailbox_allocate_msg(
                 buffer_size_per_pe * msg_size, &ctx);
@@ -138,8 +138,6 @@ int mailbox_buffer_flush(mailbox_buffer_t *buf, int max_tries) {
         mailbox_header_wrapper_t *pe_buf = buf->active_buffers[p];
         if (nbuffered > 0) {
             assert(pe_buf);
-            unsigned count_loops = 0;
-            int printed_warning = 0;
 
             int success = mailbox_send(pe_buf->msg, pe_buf->ctx,
                     nbuffered * buf->msg_size, p, max_tries, buf->mbox);

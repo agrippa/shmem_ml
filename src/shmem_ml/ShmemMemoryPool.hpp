@@ -5,11 +5,11 @@
 extern "C" {
 #endif
 #include <dlmalloc/dlmalloc.h>
+#include <shmem.h>
 #ifdef __cplusplus
 }
 #endif
 
-#include <shmem.h>
 #include <assert.h>
 #include <arrow/memory_pool.h>
 

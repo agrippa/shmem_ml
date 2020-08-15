@@ -8,7 +8,12 @@
 #include <arrow/array.h>
 #include <arrow/array/builder_binary.h>
 #include <arrow/io/file.h>
+#include <arrow/python/pyarrow.h>
 #include <set>
+
+#include <pybind11/pybind11.h>
+
+namespace py = pybind11;
 
 #define ATOMICS_AS_MSGS
 
@@ -368,6 +373,10 @@ class ShmemML1D {
             return new_arr;
         }
 
+        std::shared_ptr<arrow::Array> get_arrow_array() {
+            return std::dynamic_pointer_cast<arrow::Array, arrow::FixedSizeBinaryArray>(_arr);
+        }
+
     protected:
         T* pwork;
         long *psync;
@@ -384,7 +393,7 @@ class ShmemML1D {
                 if (success) {
                     assert(msg_len % sizeof(*buffered_atomics) == 0);
                     size_t nmsgs = msg_len / sizeof(*buffered_atomics);
-                    for (int m = 0; m < nmsgs; m++) {
+                    for (unsigned m = 0; m < nmsgs; m++) {
                         atomics_msg_t<T> *msg = &buffered_atomics[m];
                         switch (msg->op) {
                             case (CAS):
@@ -578,6 +587,9 @@ void ReplicatedShmemML1D<int>::reduce_all_or();
 
 template<>
 void ReplicatedShmemML1D<unsigned>::reduce_all_or();
+
+void shmem_ml_init();
+void shmem_ml_finalize();
 
 unsigned long long shmem_ml_current_time_us();
 

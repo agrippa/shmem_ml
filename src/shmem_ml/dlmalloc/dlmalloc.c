@@ -235,7 +235,7 @@ MALLOC_ALIGNMENT         default: (size_t)8
 
 MSPACES                  default: 0 (false)
   If true, compile in support for independent allocation spaces.
-  This is only supported if HAVE_MMAP is true.
+  This is only supported if DLMALLOC_HAVE_MMAP is true.
 
 ONLY_MSPACES             default: 0 (false)
   If true, only compile in mspace versions, not regular versions.
@@ -344,7 +344,7 @@ NO_SEGMENT_TRAVERSAL       default: 0
   merging of segments that are contiguous, and selectively
   releasing them to the OS if unused, but bounds execution times.
 
-HAVE_MMAP                 default: 1 (true)
+DLMALLOC_HAVE_MMAP                 default: 1 (true)
   True if this system supports mmap or an emulation of it.  If so, and
   HAVE_MORECORE is not true, MMAP is used for all system
   allocation. If set and HAVE_MORECORE is true as well, MMAP is
@@ -354,7 +354,7 @@ HAVE_MMAP                 default: 1 (true)
   able to unmap memory that may have be allocated using multiple calls
   to MMAP, so long as they are adjacent.
 
-HAVE_MREMAP               default: 1 on linux, else 0
+DLMALLOC_HAVE_MREMAP               default: 1 on linux, else 0
   If true realloc() uses mremap() to re-allocate large blocks and
   extend or shrink allocation spaces.
 
@@ -465,7 +465,7 @@ DEFAULT_MMAP_THRESHOLD       default: 256K
   empirically derived value that works well in most systems. You can
   disable mmap by setting to MAX_SIZE_T.
 
-MAX_RELEASE_CHECK_RATE   default: 4095 unless not HAVE_MMAP
+MAX_RELEASE_CHECK_RATE   default: 4095 unless not DLMALLOC_HAVE_MMAP
   The number of consolidated frees between checks to release
   unused segments when freeing. When using non-contiguous segments,
   especially with multiple mspaces, checking only for topmost space
@@ -497,7 +497,7 @@ MAX_RELEASE_CHECK_RATE   default: 4095 unless not HAVE_MMAP
 #ifdef WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
-#define HAVE_MMAP 1
+#define DLMALLOC_HAVE_MMAP 1
 #define HAVE_MORECORE 0
 #define LACKS_UNISTD_H
 #define LACKS_SYS_PARAM_H
@@ -520,7 +520,7 @@ MAX_RELEASE_CHECK_RATE   default: 4095 unless not HAVE_MMAP
 /* Mac OSX docs advise not to use sbrk; it seems better to use mmap */
 #ifndef HAVE_MORECORE
 #define HAVE_MORECORE 0
-#define HAVE_MMAP 1
+#define DLMALLOC_HAVE_MMAP 1
 /* OSX allocators provide 16 byte alignment */
 #ifndef MALLOC_ALIGNMENT
 #define MALLOC_ALIGNMENT ((size_t)16U)
@@ -583,19 +583,19 @@ MAX_RELEASE_CHECK_RATE   default: 4095 unless not HAVE_MMAP
 #ifndef INSECURE
 #define INSECURE 0
 #endif  /* INSECURE */
-#ifndef HAVE_MMAP
-#define HAVE_MMAP 1
-#endif  /* HAVE_MMAP */
+#ifndef DLMALLOC_HAVE_MMAP
+#define DLMALLOC_HAVE_MMAP 1
+#endif  /* DLMALLOC_HAVE_MMAP */
 #ifndef MMAP_CLEARS
 #define MMAP_CLEARS 1
 #endif  /* MMAP_CLEARS */
-#ifndef HAVE_MREMAP
+#ifndef DLMALLOC_HAVE_MREMAP
 #ifdef linux
-#define HAVE_MREMAP 1
+#define DLMALLOC_HAVE_MREMAP 1
 #else   /* linux */
-#define HAVE_MREMAP 0
+#define DLMALLOC_HAVE_MREMAP 0
 #endif  /* linux */
-#endif  /* HAVE_MREMAP */
+#endif  /* DLMALLOC_HAVE_MREMAP */
 #ifndef MALLOC_FAILURE_ACTION
 #define MALLOC_FAILURE_ACTION  errno = ENOMEM;
 #endif  /* MALLOC_FAILURE_ACTION */
@@ -629,18 +629,18 @@ MAX_RELEASE_CHECK_RATE   default: 4095 unless not HAVE_MMAP
 #endif  /* MORECORE_CANNOT_TRIM */
 #endif  /* DEFAULT_TRIM_THRESHOLD */
 #ifndef DEFAULT_MMAP_THRESHOLD
-#if HAVE_MMAP
+#if DLMALLOC_HAVE_MMAP
 #define DEFAULT_MMAP_THRESHOLD ((size_t)256U * (size_t)1024U)
-#else   /* HAVE_MMAP */
+#else   /* DLMALLOC_HAVE_MMAP */
 #define DEFAULT_MMAP_THRESHOLD MAX_SIZE_T
-#endif  /* HAVE_MMAP */
+#endif  /* DLMALLOC_HAVE_MMAP */
 #endif  /* DEFAULT_MMAP_THRESHOLD */
 #ifndef MAX_RELEASE_CHECK_RATE
-#if HAVE_MMAP
+#if DLMALLOC_HAVE_MMAP
 #define MAX_RELEASE_CHECK_RATE 4095
 #else
 #define MAX_RELEASE_CHECK_RATE MAX_SIZE_T
-#endif /* HAVE_MMAP */
+#endif /* DLMALLOC_HAVE_MMAP */
 #endif /* MAX_RELEASE_CHECK_RATE */
 #ifndef USE_BUILTIN_FFS
 #define USE_BUILTIN_FFS 0
@@ -1315,7 +1315,7 @@ int mspace_mallopt(int, int);
 #include <strings.h>     /* for ffs */
 #endif /* LACKS_STRINGS_H */
 #endif /* USE_BUILTIN_FFS */
-#if HAVE_MMAP
+#if DLMALLOC_HAVE_MMAP
 #ifndef LACKS_SYS_MMAN_H
 /* On some versions of linux, mremap decl in mman.h needs __USE_GNU set */
 #if (defined(linux) && !defined(__USE_GNU))
@@ -1329,7 +1329,7 @@ int mspace_mallopt(int, int);
 #ifndef LACKS_FCNTL_H
 #include <fcntl.h>
 #endif /* LACKS_FCNTL_H */
-#endif /* HAVE_MMAP */
+#endif /* DLMALLOC_HAVE_MMAP */
 #ifndef LACKS_UNISTD_H
 #include <unistd.h>     /* for sbrk, sysconf */
 #else /* LACKS_UNISTD_H */
@@ -1463,7 +1463,7 @@ unsigned char _BitScanReverse(unsigned long *index, unsigned long mask);
 /* -------------------------- MMAP preliminaries ------------------------- */
 
 /*
-   If HAVE_MORECORE or HAVE_MMAP are false, we just define calls and
+   If HAVE_MORECORE or DLMALLOC_HAVE_MMAP are false, we just define calls and
    checks to fail so compiler optimizer can delete code rather than
    using so many "#if"s.
 */
@@ -1473,7 +1473,7 @@ unsigned char _BitScanReverse(unsigned long *index, unsigned long mask);
 #define MFAIL                ((void*)(MAX_SIZE_T))
 #define CMFAIL               ((char*)(MFAIL)) /* defined for convenience */
 
-#if HAVE_MMAP
+#if DLMALLOC_HAVE_MMAP
 
 #ifndef WIN32
 #define MUNMAP_DEFAULT(a, s)  munmap((a), (s))
@@ -1536,13 +1536,13 @@ static FORCEINLINE int win32munmap(void* ptr, size_t size) {
 #define MUNMAP_DEFAULT(a, s)        win32munmap((a), (s))
 #define DIRECT_MMAP_DEFAULT(s)      win32direct_mmap(s)
 #endif /* WIN32 */
-#endif /* HAVE_MMAP */
+#endif /* DLMALLOC_HAVE_MMAP */
 
-#if HAVE_MREMAP
+#if DLMALLOC_HAVE_MREMAP
 #ifndef WIN32
 #define MREMAP_DEFAULT(addr, osz, nsz, mv) mremap((addr), (osz), (nsz), (mv))
 #endif /* WIN32 */
-#endif /* HAVE_MREMAP */
+#endif /* DLMALLOC_HAVE_MREMAP */
 
 
 /**
@@ -1561,7 +1561,7 @@ static FORCEINLINE int win32munmap(void* ptr, size_t size) {
 /**
  * Define CALL_MMAP/CALL_MUNMAP/CALL_DIRECT_MMAP
  */
-#if HAVE_MMAP
+#if DLMALLOC_HAVE_MMAP
     #define USE_MMAP_BIT            (SIZE_T_ONE)
 
     #ifdef MMAP
@@ -1579,7 +1579,7 @@ static FORCEINLINE int win32munmap(void* ptr, size_t size) {
     #else /* DIRECT_MMAP */
         #define CALL_DIRECT_MMAP(s) DIRECT_MMAP_DEFAULT(s)
     #endif /* DIRECT_MMAP */
-#else  /* HAVE_MMAP */
+#else  /* DLMALLOC_HAVE_MMAP */
     #define USE_MMAP_BIT            (SIZE_T_ZERO)
 
     #define MMAP(s)                 MFAIL
@@ -1588,20 +1588,20 @@ static FORCEINLINE int win32munmap(void* ptr, size_t size) {
     #define CALL_DIRECT_MMAP(s)     DIRECT_MMAP(s)
     #define CALL_MMAP(s)            MMAP(s)
     #define CALL_MUNMAP(a, s)       MUNMAP((a), (s))
-#endif /* HAVE_MMAP */
+#endif /* DLMALLOC_HAVE_MMAP */
 
 /**
  * Define CALL_MREMAP
  */
-#if HAVE_MMAP && HAVE_MREMAP
+#if DLMALLOC_HAVE_MMAP && DLMALLOC_HAVE_MREMAP
     #ifdef MREMAP
         #define CALL_MREMAP(addr, osz, nsz, mv) MREMAP((addr), (osz), (nsz), (mv))
     #else /* MREMAP */
         #define CALL_MREMAP(addr, osz, nsz, mv) MREMAP_DEFAULT((addr), (osz), (nsz), (mv))
     #endif /* MREMAP */
-#else  /* HAVE_MMAP && HAVE_MREMAP */
+#else  /* DLMALLOC_HAVE_MMAP && DLMALLOC_HAVE_MREMAP */
     #define CALL_MREMAP(addr, osz, nsz, mv)     MFAIL
-#endif /* HAVE_MMAP && HAVE_MREMAP */
+#endif /* DLMALLOC_HAVE_MMAP && DLMALLOC_HAVE_MREMAP */
 
 /* mstate bit set if continguous morecore disabled or failed */
 #define USE_NONCONTIGUOUS_BIT (4U)
@@ -3884,9 +3884,9 @@ static void* sys_alloc(mstate m, size_t nb) {
     1. A call to MORECORE that can normally contiguously extend memory.
        (disabled if not MORECORE_CONTIGUOUS or not HAVE_MORECORE or
        or main space is mmapped or a previous contiguous call failed)
-    2. A call to MMAP new space (disabled if not HAVE_MMAP).
+    2. A call to MMAP new space (disabled if not DLMALLOC_HAVE_MMAP).
        Note that under the default settings, if MORECORE is unable to
-       fulfill a request, and HAVE_MMAP is true, then mmap is
+       fulfill a request, and DLMALLOC_HAVE_MMAP is true, then mmap is
        used as a noncontiguous system allocator. This is a useful backup
        strategy for systems with holes in address spaces -- in this case
        sbrk cannot contiguously expand the heap, but mmap may be able to
@@ -3959,7 +3959,7 @@ static void* sys_alloc(mstate m, size_t nb) {
     RELEASE_MALLOC_GLOBAL_LOCK();
   }
 
-  if (HAVE_MMAP && tbase == CMFAIL) {  /* Try MMAP */
+  if (DLMALLOC_HAVE_MMAP && tbase == CMFAIL) {  /* Try MMAP */
     size_t rsize = granularity_align(nb + SYS_ALLOC_PADDING);
     if (rsize > nb) { /* Fail if wraps around zero */
       char* mp = (char*)(CALL_MMAP(rsize));
@@ -4129,7 +4129,7 @@ static int sys_trim(mstate m, size_t pad) {
 
       if (!is_extern_segment(sp)) {
         if (is_mmapped_segment(sp)) {
-          if (HAVE_MMAP &&
+          if (DLMALLOC_HAVE_MMAP &&
               sp->size >= extra &&
               !has_segment_link(m, sp)) { /* can't shrink if pinned */
             size_t newsize = sp->size - extra;
@@ -4167,7 +4167,7 @@ static int sys_trim(mstate m, size_t pad) {
     }
 
     /* Unmap any unused mmapped segments */
-    if (HAVE_MMAP)
+    if (DLMALLOC_HAVE_MMAP)
       released += release_unused_segments(m);
 
     /* On failure, disable autotrim to avoid repeated failed future calls */

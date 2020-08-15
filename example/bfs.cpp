@@ -5,9 +5,9 @@
 #endif
 #include <inttypes.h>
 #include <generator/splittable_mrg.h>
-extern "C" {
+// extern "C" {
 #include <generator/make_graph.h>
-}
+// }
 #include <generator/graph_generator.h>
 #include <generator/utils.h>
 

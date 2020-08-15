@@ -1,26 +1,30 @@
-CC=cc
-FLAGS=-g -O3 -Isrc -Wall -Wextra -std=c++11 -Isrc -Isrc/dlmalloc \
-	  -I$(ARROW_HOME)/include -DMSPACES=1 -DONLY_MSPACES=1 \
-	  -DHAVE_MORECORE=0 -DHAVE_MMAP=0 -DHAVE_MREMAP=0 -DUSE_LOCKS=0 \
-	  -DFOOTERS=1 -no-inline-max-size -no-inline-max-total-size -Isrc/crc
-LINK_FLAGS=-lshmem_ml -larrow -Lbin -L$(ARROW_HOME)/lib64
+CC=g++
+FLAGS=-g -O3 -Isrc/shmem_ml -Wall -Wextra -std=c++11 -Isrc/shmem_ml/dlmalloc -Isrc/shmem_ml/crc \
+	  -I$(ARROW_HOME)/include -I$(PYBIND11_HOME)/include $(shell python3-config --includes) \
+	  -DMSPACES=1 -DONLY_MSPACES=1 -DHAVE_MORECORE=0 -DUSE_LOCKS=0 -DFOOTERS=1 -I$(OPENSHMEM_HOME)/include -I$(shell python -c 'import numpy; print(numpy.get_include())') -DNPY_NO_DEPRECATED_API
+LINK_FLAGS=-lshmem_ml -larrow -larrow_python -Lbin -L$(ARROW_HOME)/lib $(shell python3-config --ldflags) -L$(OPENSHMEM_HOME)/lib64 -lsma
+
+libs: bin/libshmem_ml.a src/shmem_ml/core.so
 
 bin/libshmem_ml.a: bin/dlmalloc.o bin/shmem_ml.o bin/ShmemMemoryPool.o bin/mailbox.o bin/mailbox_buffer.o
 	ar rcs $@ $^
 
-bin/dlmalloc.o: src/dlmalloc/dlmalloc.c
+src/shmem_ml/core.so: bin/dlmalloc.o bin/shmem_ml.o bin/ShmemMemoryPool.o bin/mailbox.o bin/mailbox_buffer.o
+	$(CC) $(FLAGS) -shared $^ -o $@ -larrow -larrow_python -Lbin -L$(ARROW_HOME)/lib $(shell python3-config --ldflags) -L$(OPENSHMEM_HOME)/lib64 -lsma
+
+bin/dlmalloc.o: src/shmem_ml/dlmalloc/dlmalloc.c
 	$(CC) $(FLAGS) -fPIC -c -o $@ $^
 
-bin/shmem_ml.o: src/shmem_ml.cpp
+bin/shmem_ml.o: src/shmem_ml/shmem_ml.cpp
 	$(CC) $(FLAGS) -fPIC -c -o $@ $^
 
-bin/ShmemMemoryPool.o: src/ShmemMemoryPool.cpp
+bin/ShmemMemoryPool.o: src/shmem_ml/ShmemMemoryPool.cpp
 	$(CC) $(FLAGS) -fPIC -c -o $@ $^
 
-bin/mailbox.o: src/mailbox.cpp
+bin/mailbox.o: src/shmem_ml/mailbox.cpp
 	$(CC) $(FLAGS) -fPIC -c -o $@ $^
 
-bin/mailbox_buffer.o: src/mailbox_buffer.cpp
+bin/mailbox_buffer.o: src/shmem_ml/mailbox_buffer.cpp
 	$(CC) $(FLAGS) -fPIC -c -o $@ $^
 
 bin/bfs: example/bfs.cpp \
@@ -38,4 +42,4 @@ bin/save_load_get_set: test/save_load_get_set.cpp bin/libshmem_ml.a
 	$(CC) $(FLAGS) -o $@ test/save_load_get_set.cpp $(LINK_FLAGS)
 
 clean:
-	rm -f bin/*
+	rm -f bin/* $(PYLIB)

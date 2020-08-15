@@ -1,5 +1,7 @@
+extern "C" {
 #include <shmem.h>
 #include <shmemx.h>
+}
 #include <string.h>
 #include <assert.h>
 #include <stdlib.h>
@@ -132,7 +134,7 @@ int mailbox_send(mailbox_msg_header_t *msg, shmem_ctx_t ctx, size_t msg_len,
     uint64_t indices = shmem_ctx_uint64_atomic_fetch(ctx, mailbox->indices, target_pe);
     uint32_t start_send_index = 0;
 
-    unsigned tries = 0;
+    int tries = 0;
     while (max_tries < 0 || tries < max_tries) {
         if (tries > 1000000) {
             fprintf(stderr, "WARNING PE %d hitting many failed tries sending "

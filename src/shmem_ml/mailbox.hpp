@@ -3,7 +3,9 @@
 
 #include <stdint.h>
 #include <stdlib.h>
+extern "C" {
 #include <shmem.h>
+}
 
 #define CRC32
 #include "crc.h"
