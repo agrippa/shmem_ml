@@ -1,4 +1,4 @@
-from PyShmemML import shmem_ml_init, shmem_ml_finalize, PyShmemML1DD
+from PyShmemML import shmem_ml_init, shmem_ml_finalize, PyShmemML1DD, rand
 # from shmem_ml import ml
 # from shmem_ml import random
 
@@ -11,10 +11,9 @@ value_at_zero = vec.get(0)
 
 print('Hello! ' + str(value_at_zero))
 
-vec.get_local_arrow_array()
+vec = rand(vec)
 
 shmem_ml_finalize()
 
 # ml.train_ml_model()
 
-# random.rand(vec)

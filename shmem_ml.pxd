@@ -1,7 +1,16 @@
-from numpy cimport int64_t
+import numpy as np
+# from numpy cimport int64_t
 import pyarrow
 from libcpp.memory cimport shared_ptr
 from pyarrow.includes.libarrow cimport CArray
+
+np.import_array()
+
+# cdef extern from "shmem_ml.cpp":
+#     pass
+
+cdef extern from "stdint.h":
+    ctypedef signed int int64_t
 
 cdef extern from "shmem_ml.hpp":
     cpdef void shmem_ml_init()

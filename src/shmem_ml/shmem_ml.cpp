@@ -3,7 +3,6 @@
 
 #include "ShmemMemoryPool.hpp"
 #include "shmem_ml.hpp"
-#include <numpy/arrayobject.h>
 
 unsigned long long shmem_ml_current_time_us() {
     struct timespec monotime;
@@ -121,7 +120,7 @@ void ReplicatedShmemML1D<unsigned>::reduce_all_or() {
 void shmem_ml_init() {
     shmem_init();
     // ugly_workaround();
-    arrow::py::import_pyarrow();
+    // arrow::py::import_pyarrow();
 }
 
 void shmem_ml_finalize() {

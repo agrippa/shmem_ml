@@ -5,6 +5,7 @@
 #include <mailbox.hpp>
 #include <mailbox_buffer.hpp>
 #include <ShmemMemoryPool.hpp>
+// #include <numpy/arrayobject.h>
 #include <arrow/array.h>
 #include <arrow/array/builder_binary.h>
 #include <arrow/io/file.h>

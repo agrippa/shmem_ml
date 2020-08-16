@@ -3,16 +3,18 @@
 import pyarrow
 from pyarrow.lib cimport *
 
+import numpy as np
+# cimport numpy as np
+# from numpy cimport int64_t
+
+# np.import_array()
+
 from shmem_ml cimport shmem_ml_init as c_shmem_ml_init
 from shmem_ml cimport shmem_ml_finalize as c_shmem_ml_finalize
 
-import numpy as np
-cimport numpy as np
-from numpy cimport int64_t
 
 from shmem_ml cimport ShmemML1D
 
-np.import_array()
 
 def shmem_ml_init():
     c_shmem_ml_init()
@@ -41,3 +43,10 @@ cdef class PyShmemML1DD:
 
     def get_local_arrow_array(self):
         return pyarrow_wrap_array(self.c_vec.get_arrow_array())
+
+def rand(vec):
+    assert isinstance(vec, PyShmemML1DD)
+    arr = vec.get_local_arrow_array()
+    np_arr = arr.to_numpy()
+    np_arr = np.random.rand(np_arr.shape)
+    return vec
