@@ -10,6 +10,9 @@ vec.sync()
 value_at_zero = vec.get(0)
 
 print('Hello! ' + str(value_at_zero))
+print('N=' + str(vec.N()) + ' local slice start=' +
+        str(vec.local_slice_start()) + ' local slice end=' +
+        str(vec.local_slice_end()))
 
 vec = rand(vec)
 

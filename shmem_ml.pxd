@@ -21,4 +21,8 @@ cdef extern from "shmem_ml.hpp":
         void clear(T clear_to)
         T get(int64_t)
         void sync()
+        int64_t N()
+        int64_t local_slice_start()
+        int64_t local_slice_end()
         shared_ptr[CArray] get_arrow_array()
+        void update_from_arrow_array(shared_ptr[CArray] src)

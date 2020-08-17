@@ -5,16 +5,13 @@
 #include <mailbox.hpp>
 #include <mailbox_buffer.hpp>
 #include <ShmemMemoryPool.hpp>
-// #include <numpy/arrayobject.h>
 #include <arrow/array.h>
 #include <arrow/array/builder_binary.h>
 #include <arrow/io/file.h>
 #include <arrow/python/pyarrow.h>
 #include <set>
 
-#include <pybind11/pybind11.h>
-
-namespace py = pybind11;
+#define BITS_PER_BYTE 8
 
 #define ATOMICS_AS_MSGS
 
@@ -147,10 +144,22 @@ class ShmemML1D {
 
         void clear(T init_val) {
             T* local_slice = this->raw_slice();
+            uint8_t *null_bitmap = this->null_bitmap();
+
             int64_t local_slice_len = local_slice_end() - local_slice_start();
             for (int64_t i = 0; i < local_slice_len; i++) {
                 local_slice[i] = init_val;
+
+                int64_t byte_index = i / BITS_PER_BYTE;
+                int64_t bit_offset = i % BITS_PER_BYTE;
+                uint8_t mask = (((uint8_t)i) << bit_offset);
+                null_bitmap[byte_index] = (null_bitmap[byte_index] | mask);
             }
+
+
+
+            null_bitmap[0] = 0xff;
+
             shmem_barrier_all();
         }
 
@@ -169,6 +178,11 @@ class ShmemML1D {
         }
         inline T* raw_slice() {
             return (T*)_arr->raw_values();
+        }
+        inline uint8_t* null_bitmap() {
+            uint8_t *bitmap = _arr->null_bitmap()->mutable_data();
+            assert(bitmap);
+            return bitmap;
         }
 
         // Inefficient but simple
@@ -376,6 +390,21 @@ class ShmemML1D {
 
         std::shared_ptr<arrow::Array> get_arrow_array() {
             return std::dynamic_pointer_cast<arrow::Array, arrow::FixedSizeBinaryArray>(_arr);
+        }
+
+        void update_from_arrow_array(std::shared_ptr<arrow::Array> src) {
+            assert(src->length() == _arr->length());
+
+            std::shared_ptr<arrow::PrimitiveArray> src_arr =
+                std::dynamic_pointer_cast<arrow::PrimitiveArray, arrow::Array>(src);
+            assert(src_arr);
+
+            T* dst = raw_slice();
+            T* typed_src = (T*)src_arr->values()->data();
+
+            for (int64_t i = 0; i < _arr->length(); i++) {
+                dst[i] = typed_src[i];
+            }
         }
 
     protected:

@@ -45,4 +45,4 @@ bin/save_load_get_set: test/save_load_get_set.cpp bin/libshmem_ml.a
 	$(CC) $(FLAGS) -o $@ test/save_load_get_set.cpp $(LINK_FLAGS)
 
 clean:
-	rm -f bin/* $(PYLIB)
+	rm -f bin/* PyShmemML.cpython-37m-x86_64-linux-gnu.so src/shmem_ml/core.so src/shmem_ml/PyShmemML.cpp

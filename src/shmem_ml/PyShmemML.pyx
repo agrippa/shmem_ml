@@ -41,12 +41,27 @@ cdef class PyShmemML1DD:
     def sync(self):
         self.c_vec.sync()
 
+    def N(self):
+        return self.c_vec.N()
+
+    def local_slice_start(self):
+        return self.c_vec.local_slice_start()
+
+    def local_slice_end(self):
+        return self.c_vec.local_slice_end()
+
     def get_local_arrow_array(self):
         return pyarrow_wrap_array(self.c_vec.get_arrow_array())
+
+    def update_from_arrow(self, arrow_arr):
+        cdef shared_ptr[CArray] arr = pyarrow_unwrap_array(arrow_arr)
+        self.c_vec.update_from_arrow_array(arr)
+
 
 def rand(vec):
     assert isinstance(vec, PyShmemML1DD)
     arr = vec.get_local_arrow_array()
-    np_arr = arr.to_numpy()
-    np_arr = np.random.rand(np_arr.shape)
+    np_arr = arr.to_numpy(zero_copy_only=False, writable=True)
+    np_arr[:] = np.random.rand(np_arr.shape[0])
+    vec.update_from_arrow(pyarrow.array(np_arr))
     return vec

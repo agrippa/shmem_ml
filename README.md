@@ -13,8 +13,6 @@ On Cori:
 
     export OPENSHMEM_HOME=$CRAY_OPENSHMEMX_DIR
 
-    export PYBIND11_HOME=$HOME/pybind11/build/mock_install
-
     export LD_LIBRARY_PATH=$OPENSHMEM_HOME/lib64:$LD_LIBRARY_PATH
 
     export ARROW_HOME=$HOME/.conda/envs/pyarrow-dev/
@@ -24,10 +22,6 @@ On Cori:
 
 - Apache Arrow C++ and Python APIs
   - https://github.com/apache/arrow
-
-- pybind11
-  - https://github.com/pybind/pybind11
-  - mkdir build && cd build && cmake ..
 
 ## Building Arrow on Cori
 
