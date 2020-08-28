@@ -11,13 +11,15 @@ import numpy as np
 
 from shmem_ml cimport shmem_ml_init as c_shmem_ml_init
 from shmem_ml cimport shmem_ml_finalize as c_shmem_ml_finalize
-
+from shmem_ml cimport shmem_my_pe as c_shmem_my_pe
+from shmem_ml cimport shmem_n_pes as c_shmem_n_pes
 
 from shmem_ml cimport ShmemML1D
 
 
 def shmem_ml_init():
     c_shmem_ml_init()
+    tmp = pyarrow.array([])
 
 def shmem_ml_finalize():
     c_shmem_ml_finalize()
@@ -63,5 +65,12 @@ def rand(vec):
     arr = vec.get_local_arrow_array()
     np_arr = arr.to_numpy(zero_copy_only=False, writable=True)
     np_arr[:] = np.random.rand(np_arr.shape[0])
-    vec.update_from_arrow(pyarrow.array(np_arr))
+    pyarr = pyarrow.array(np_arr)
+    vec.update_from_arrow(pyarr)
     return vec
+
+def pe():
+    return c_shmem_my_pe()
+
+def npes():
+    return c_shmem_n_pes()

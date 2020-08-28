@@ -3,7 +3,7 @@
 #SBATCH -p debug
 #SBATCH -N 1
 #SBATCH -C haswell
-#SBATCH -t 00:02:00
+#SBATCH -t 00:10:00
 #SBATCH -J SHMEM_ML_PY
 #SBATCH --exclusive
 #SBATCH --contiguous
@@ -42,4 +42,4 @@ export SLURM_ARGS="--ntasks=$(($SLURM_NNODES * $CORES_PER_NODE)) --ntasks-per-so
 
 export PYTHONPATH=$HOME/shmem_ml:$PYTHONPATH
 echo
-srun --ntasks=2 python $HOME/shmem_ml/example/python_wrapper.py
+time srun $SLURM_ARGS python $HOME/shmem_ml/example/python_wrapper.py

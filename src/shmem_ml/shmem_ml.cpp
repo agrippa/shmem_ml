@@ -120,7 +120,7 @@ void ReplicatedShmemML1D<unsigned>::reduce_all_or() {
 void shmem_ml_init() {
     shmem_init();
     // ugly_workaround();
-    // arrow::py::import_pyarrow();
+    arrow::py::import_pyarrow();
 }
 
 void shmem_ml_finalize() {
