@@ -1,7 +1,7 @@
 #!/bin/bash -l
 
 #SBATCH -p debug
-#SBATCH -N 4
+#SBATCH -N 64
 #SBATCH -C haswell
 #SBATCH -t 00:10:00
 #SBATCH -J SHMEM_ML
@@ -23,7 +23,7 @@ setup_shmem
 
 # module list
 
-export LD_LIBRARY_PATH=$ARROW_HOME/lib64:$LD_LIBRARY_PATH
+export LD_LIBRARY_PATH=$ARROW_HOME/lib:$LD_LIBRARY_PATH
 export LD_LIBRARY_PATH=$OPENSHMEM_HOME/lib64:$LD_LIBRARY_PATH
 
 # 2 sockets x 16 cores per socket for Cori Haswell

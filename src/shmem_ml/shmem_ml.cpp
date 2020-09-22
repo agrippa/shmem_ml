@@ -111,15 +111,20 @@ void ReplicatedShmemML1D<unsigned>::reduce_all_or() {
     shmem_barrier_all();
 }
 
-// https://stackoverflow.com/questions/52074167/import-array-error-while-embedding-python-and-numpy-to-c
-// static void* ugly_workaround() {
-//     import_array();
-//     return NULL;
-// }
+template<>
+void ReplicatedShmemML1D<double>::reduce_all_sum() {
+    for (int i = 0; i < SHMEM_REDUCE_SYNC_SIZE; i++) {
+        psync[i] = SHMEM_SYNC_VALUE;
+    }
+    shmem_barrier_all();
+    shmem_double_sum_to_all((double*)this->raw_slice(),
+            (double*)this->raw_slice(), _replicated_N, 0, 0,
+            shmem_n_pes(), (double*)pwork, psync);
+    shmem_barrier_all();
+}
 
 void shmem_ml_init() {
     shmem_init();
-    // ugly_workaround();
     arrow::py::import_pyarrow();
 }
 

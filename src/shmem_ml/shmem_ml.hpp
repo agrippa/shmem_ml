@@ -115,8 +115,14 @@ class ShmemML1D {
             std::shared_ptr<arrow::DataType> type = arrow::fixed_size_binary(sizeof(T));
 
             arrow::FixedSizeBinaryBuilder builder(type, pool);
-            CHECK_ARROW(builder.AppendNulls(_chunk_size));
+            // CHECK_ARROW(builder.AppendNulls(_chunk_size));
+            CHECK_ARROW(builder.Reserve(_chunk_size));
+            for (int64_t i = 0; i < _chunk_size; i++) {
+                CHECK_ARROW(builder.Append((T)0));
+            }
             builder.Finish(&_arr);
+            _arr->ValidateFull();
+            fprintf(stderr, "A> # nulls=%ld, chunk size=%ld\n", _arr->null_count(), _chunk_size);
 
             symm_reduce_dest = (T*)shmem_malloc(sizeof(*symm_reduce_dest));
             symm_reduce_src = (T*)shmem_malloc(sizeof(*symm_reduce_src));
@@ -143,6 +149,7 @@ class ShmemML1D {
         }
 
         void clear(T init_val) {
+            fprintf(stderr, "B> # nulls=%ld\n", _arr->null_count());
             T* local_slice = this->raw_slice();
             uint8_t *null_bitmap = this->null_bitmap();
 
@@ -150,15 +157,15 @@ class ShmemML1D {
             for (int64_t i = 0; i < local_slice_len; i++) {
                 local_slice[i] = init_val;
 
-                int64_t byte_index = i / BITS_PER_BYTE;
-                int64_t bit_offset = i % BITS_PER_BYTE;
-                uint8_t mask = (((uint8_t)i) << bit_offset);
-                null_bitmap[byte_index] = (null_bitmap[byte_index] | mask);
+                //int64_t byte_index = i / BITS_PER_BYTE;
+                //int64_t bit_offset = i % BITS_PER_BYTE;
+                //uint8_t mask = (((uint8_t)1) << bit_offset);
+                //mask = (~mask);
+                //null_bitmap[byte_index] = (null_bitmap[byte_index] & mask);
             }
 
-
-
-            null_bitmap[0] = 0xff;
+            _arr->ValidateFull();
+            fprintf(stderr, "C> # nulls=%ld\n", _arr->null_count());
 
             shmem_barrier_all();
         }
@@ -412,6 +419,7 @@ class ShmemML1D {
         long *psync;
 
     private:
+#ifdef ATOMICS_AS_MSGS
         void process_atomic_msgs() {
             int success;
             do {
@@ -447,6 +455,7 @@ class ShmemML1D {
                 }
             } while (success);
         }
+#endif
 
         int64_t calculate_local_slice_start(int pe) {
             return pe * _chunk_size;
@@ -605,6 +614,7 @@ class ReplicatedShmemML1D : public ShmemML1D<T> {
         }
 
         void reduce_all_or();
+        void reduce_all_sum();
 
         void zero() {
             memset(this->raw_slice(), 0x00, _replicated_N * sizeof(T));
@@ -617,6 +627,9 @@ void ReplicatedShmemML1D<int>::reduce_all_or();
 
 template<>
 void ReplicatedShmemML1D<unsigned>::reduce_all_or();
+
+template<>
+void ReplicatedShmemML1D<double>::reduce_all_sum();
 
 void shmem_ml_init();
 void shmem_ml_finalize();

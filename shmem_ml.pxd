@@ -27,6 +27,13 @@ cdef extern from "shmem_ml.hpp":
         shared_ptr[CArray] get_arrow_array()
         void update_from_arrow_array(shared_ptr[CArray] src)
 
+    cdef cppclass ReplicatedShmemML1D[T]:
+        ReplicatedShmemML1D(int64_t) except +
+        void reduce_all_sum()
+        shared_ptr[CArray] get_arrow_array()
+        void update_from_arrow_array(shared_ptr[CArray] src)
+
+
 cdef extern from "shmem.h":
     cdef int shmem_my_pe()
     cdef int shmem_n_pes()

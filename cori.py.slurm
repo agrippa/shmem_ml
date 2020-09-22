@@ -21,8 +21,6 @@ echo "Running with OpenSHMEM installation at $OPENSHMEM_HOME"
 source ~/.bashrc.ext
 setup_shmem
 
-# module list
-
 export LD_LIBRARY_PATH=$ARROW_HOME/lib64:$LD_LIBRARY_PATH
 export LD_LIBRARY_PATH=$OPENSHMEM_HOME/lib64:$LD_LIBRARY_PATH
 
