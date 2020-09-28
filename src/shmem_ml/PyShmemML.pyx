@@ -13,7 +13,7 @@ from shmem_ml cimport shmem_ml_finalize as c_shmem_ml_finalize
 from shmem_ml cimport shmem_my_pe as c_shmem_my_pe
 from shmem_ml cimport shmem_n_pes as c_shmem_n_pes
 
-from shmem_ml cimport ShmemML1D, ReplicatedShmemML1D
+from shmem_ml cimport ShmemML1D, ReplicatedShmemML1D, ShmemML2D
 
 
 def shmem_ml_init():
@@ -57,6 +57,29 @@ cdef class PyShmemML1DD:
     def update_from_arrow(self, arrow_arr):
         cdef shared_ptr[CArray] arr = pyarrow_unwrap_array(arrow_arr)
         self.c_vec.update_from_arrow_array(arr)
+
+
+cdef class PyShmemML2DD:
+    cdef ShmemML2D* c_mat
+
+    def __cinit__(self, int64_t M, int64_t N):
+        self.c_mat = new ShmemML2D(M, N)
+
+    def __dealloc__(self):
+        del self.c_mat
+
+    def N(self):
+        return self.c_mat.N()
+
+    def M(self):
+        return self.c_mat.M()
+
+    def get_local_arrow_record_batch(self):
+        return pyarrow_wrap_batch(self.c_mat.get_arrow_record_batch())
+
+    def update_from_arrow(self, arrow_record_batch):
+        cdef shared_ptr[CRecordBatch] batch = pyarrow_unwrap_batch(arrow_record_batch)
+        self.c_mat.update_from_arrow_record_batch(batch)
 
 
 cdef class PyReplicatedShmemML1DD:
@@ -116,25 +139,35 @@ class SGDRegressor:
             self.model.intercept_[i] = prev_intercept[i] + grad_intercept[i]
 
     def fit(self, x, y):
-        assert isinstance(x, PyShmemML1DD)
+        assert isinstance(x, PyShmemML2DD)
         assert isinstance(y, PyShmemML1DD)
 
-        x_arr = x.get_local_arrow_array()
-        x_arr = x_arr.to_numpy(zero_copy_only=True)
+        x_arr = x.get_local_arrow_record_batch()
+        x_arr = x_arr.to_pandas(zero_copy_only=True)
+        print('type of x_arr = ' + str(type(x_arr)))
 
         y_arr = y.get_local_arrow_array()
         y_arr = y_arr.to_numpy(zero_copy_only=True)
 
-        dist_coef_grad = None
-        dist_intercept_grad = None
+        # Initialize coefficients and intercepts on all ranks to the same seed
+        self.model.fit(x_arr, y_arr);
+        coef, intercept = self._copy_coef_intercept()
+        arrow_coef = pyarrow.array(coef)
+        arrow_intercept = pyarrow.array(intercept)
+        dist_coef_grad = PyReplicatedShmemML1DD(len(arrow_coef))
+        dist_intercept_grad = PyReplicatedShmemML1DD(len(arrow_intercept))
+        dist_coef_grad.update_from_arrow(arrow_coef)
+        dist_intercept_grad.update_from_arrow(arrow_intercept)
+        dist_coef_grad.bcast(0)
+        dist_intercept_grad.bcast(0)
+        set_coef = dist_coef_grad.get_local_arrow_array().to_numpy(zero_copy_only=True)
+        set_intercept = dist_intercept_grad.get_local_arrow_array().to_numpy(zero_copy_only=True)
+        self._update_coef_intercept(set_coef, set_intercept, [0.0] * len(set_coef), [0.0] * len(set_intercept))
 
-        for it in range(self.max_iter):
+        for it in range(1, self.max_iter):
             prev_coef, prev_intercept = self._copy_coef_intercept()
 
-            if it == 0:
-                self.model.fit(x_arr, y_arr)
-            else:
-                self.model.partial_fit(x_arr, y_arr)
+            self.model.partial_fit(x_arr, y_arr)
 
             after_coef, after_intercept = self._copy_coef_intercept()
             coef_grad, intercept_grad = self._compute_coef_intercept_grad(
@@ -142,10 +175,6 @@ class SGDRegressor:
 
             arrow_coef_grad = pyarrow.array(coef_grad)
             arrow_intercept_grad = pyarrow.array(intercept_grad)
-
-            if dist_coef_grad is None:
-                dist_coef_grad = PyReplicatedShmemML1DD(len(arrow_coef_grad))
-                dist_intercept_grad = PyReplicatedShmemML1DD(len(arrow_intercept_grad))
 
             # Perform a global sum of coef_grad and intercept_grad over SHMEM,
             # then add to prev_coef and prev_intercept and reset coef and
@@ -162,8 +191,8 @@ class SGDRegressor:
 
 
     def transform(self, x):
-        assert isinstance(x, PyShmemML1DD)
-        x_arr = x.get_local_arrow_array().to_numpy(zero_copy_only=True)
+        assert isinstance(x, PyShmemML2DD)
+        x_arr = x.get_local_arrow_record_batch().to_pandas(zero_copy_only=True)
         pred = self.model.transform(x_arr)
 
         dist_pred = PyShmemML1DD(x.N())
