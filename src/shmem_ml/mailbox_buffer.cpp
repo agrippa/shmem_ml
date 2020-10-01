@@ -5,10 +5,12 @@
 
 #include "mailbox_buffer.hpp"
 
+static void add_pending_buffer(mailbox_header_wrapper_t* msg,
+        mailbox_buffer_t *buf);
+
 void mailbox_buffer_init(mailbox_buffer_t *buf, mailbox_t *mbox,
         int npes, size_t msg_size, size_t buffer_size_per_pe,
         size_t buffer_pool_size) {
-    assert(buffer_pool_size >= (size_t)npes);
     buf->mbox = mbox;
     buf->npes = npes;
     buf->msg_size = msg_size;
@@ -63,13 +65,41 @@ static mailbox_header_wrapper_t* allocate_buffer(int pe, mailbox_buffer_t *buf) 
     mailbox_header_wrapper_t *msg = NULL;
 
     if (buf->free_pool) {
+        // If a free buffer is available, grab it.
         msg = buf->free_pool;
         buf->free_pool = msg->next;
         if (buf->free_pool) {
             buf->free_pool->prev = NULL;
         }
-    } else {
+    } else if (buf->pending_pool_head) {
+        /*
+         * If a buffer whose bytes have been sent (but perhaps not completed) is
+         * available, go grab it, sync it, and return it.
+         */
         msg = pop_pending_buffer(buf);
+    } else {
+        // We have run out of buffers, need to grab one, sync it, and then return it.
+        int victim_pe = -1;
+        unsigned max_buffered = 0;
+
+        for (int pe = 0; pe < shmem_n_pes(); pe++) {
+            if (buf->active_buffers[pe] && buf->nbuffered_per_pe[pe] > max_buffered) {
+                victim_pe = pe;
+                max_buffered = buf->nbuffered_per_pe[pe];
+            }
+        }
+        assert(victim_pe >= 0 && victim_pe < shmem_n_pes());
+        mailbox_header_wrapper_t *victim_msg = buf->active_buffers[victim_pe];
+
+        int success = mailbox_send(victim_msg->msg, victim_msg->ctx,
+                buf->nbuffered_per_pe[victim_pe] * buf->msg_size, victim_pe, 1, buf->mbox);
+        if (!success) {
+            return NULL;
+        }
+        buf->nbuffered_per_pe[victim_pe] = 0;
+        add_pending_buffer(victim_msg, buf);
+        msg = pop_pending_buffer(buf);
+        assert(msg);
     }
 
     msg->next = msg->prev = NULL;
@@ -119,7 +149,10 @@ int mailbox_buffer_send(const void *msg, size_t msg_len, int target_pe,
     }
 
     if (buf->active_buffers[target_pe] == NULL) {
-        allocate_buffer(target_pe, buf);
+        mailbox_header_wrapper_t* success = allocate_buffer(target_pe, buf);
+        if (success == NULL) {
+            return 0;
+        }
     }
     mailbox_header_wrapper_t *pe_buf = buf->active_buffers[target_pe];
 

@@ -103,7 +103,9 @@ mailbox_msg_header_t* mailbox_allocate_msg(size_t max_msg_len,
     assert(msg);
 
     int err = shmem_ctx_create(0, out_ctx);
-    assert(err == 0);
+    if (err != 0) {
+        *out_ctx = SHMEM_CTX_DEFAULT;
+    }
 
     return msg;
 }
