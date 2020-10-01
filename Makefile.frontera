@@ -1,12 +1,12 @@
 CC=oshcc
 CXX=oshcxx
-FLAGS=-g -O2 -Isrc -Wall -Wextra -std=c++11 -Isrc -Isrc/dlmalloc \
+FLAGS=-g -O0 -Isrc -Wall -Wextra -std=c++11 -Isrc -Isrc/dlmalloc \
 	  -I$(ARROW_HOME)/include -DMSPACES=1 -DONLY_MSPACES=1 \
 	  -DHAVE_MORECORE=0 -DHAVE_MMAP=0 -DHAVE_MREMAP=0 -DUSE_LOCKS=0 \
-	  -DFOOTERS=1 -I$(SHMEM_HOME)/include
+	  -DFOOTERS=1 -I$(SHMEM_HOME)/include -Isrc/crc
 LINK_FLAGS=-lshmem_ml -larrow -lshmem -Lbin -L$(ARROW_HOME)/lib64 -L$(SHMEM_HOME)/lib -lstdc++
 
-bin/libshmem_ml.a: bin/dlmalloc.o bin/shmem_ml.o bin/ShmemMemoryPool.o
+bin/libshmem_ml.a: bin/dlmalloc.o bin/shmem_ml.o bin/ShmemMemoryPool.o bin/mailbox.o bin/mailbox_buffer.o
 	ar rcs $@ $^
 
 bin/dlmalloc.o: src/dlmalloc/dlmalloc.c
@@ -16,6 +16,12 @@ bin/shmem_ml.o: src/shmem_ml.cpp
 	$(CXX) $(FLAGS) -fPIC -c -o $@ $^
 
 bin/ShmemMemoryPool.o: src/ShmemMemoryPool.cpp
+	$(CXX) $(FLAGS) -fPIC -c -o $@ $^
+
+bin/mailbox.o: src/mailbox.cpp
+	$(CXX) $(FLAGS) -fPIC -c -o $@ $^
+
+bin/mailbox_buffer.o: src/mailbox_buffer.cpp
 	$(CXX) $(FLAGS) -fPIC -c -o $@ $^
 
 bin/bfs: example/bfs.cpp \

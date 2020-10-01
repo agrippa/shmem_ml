@@ -124,10 +124,19 @@ class ShmemML1D {
             assert(symm_reduce_dest && symm_reduce_src && pwork && psync);
 
 #ifdef ATOMICS_AS_MSGS
+            int max_mailbox_buffers = -1;
+            if (getenv("SHMEM_ML_MAX_MAILBOX_BUFFERS")) {
+                max_mailbox_buffers = atoi(getenv("SHMEM_ML_MAX_MAILBOX_BUFFERS"));
+            }
+            unsigned n_mailbox_buffers = npes;
+            if (n_mailbox_buffers < 256) n_mailbox_buffers = 256;
+            if (max_mailbox_buffers != -1 && n_mailbox_buffers > max_mailbox_buffers) {
+                n_mailbox_buffers = max_mailbox_buffers;
+            }
             mailbox_init(&atomics_mailbox, 32 * 1024 * 1024);
             mailbox_buffer_init(&atomics_mailbox_buffer, &atomics_mailbox,
                     npes, sizeof(atomics_msg_t<T>), MAX_BUFFERED_ATOMICS,
-                    npes < 256 ? 256 : npes);
+                    n_mailbox_buffers);
             buffered_atomics = (atomics_msg_t<T>*)malloc(
                     MAX_BUFFERED_ATOMICS * sizeof(*buffered_atomics));
             assert(buffered_atomics);
