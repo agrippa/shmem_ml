@@ -124,10 +124,9 @@ class ShmemML1D_Base {
             symm_reduce_dest = (T*)shmem_malloc(sizeof(*symm_reduce_dest));
             symm_reduce_src = (T*)shmem_malloc(sizeof(*symm_reduce_src));
 
-            assert(SHMEM_REDUCE_SYNC_SIZE == SHMEM_BCAST_SYNC_SIZE);
             pwork = (T*)shmem_malloc(SHMEMML_MAX(max_shmem_reduction_n / 2 + 1,
                         SHMEM_REDUCE_MIN_WRKDATA_SIZE) * sizeof(*pwork));
-            psync = (long*)shmem_malloc(SHMEM_REDUCE_SYNC_SIZE * sizeof(*psync));
+            psync = (long*)shmem_malloc(SHMEMML_MAX(SHMEM_REDUCE_SYNC_SIZE, SHMEM_BCAST_SYNC_SIZE) * sizeof(*psync));
             assert(symm_reduce_dest && symm_reduce_src && pwork && psync);
 
 #ifdef ATOMICS_AS_MSGS
@@ -167,10 +166,10 @@ class ShmemML1D_Base {
         }
 
         ~ShmemML1D_Base() {
-            shmem_free(symm_reduce_dest);
-            shmem_free(symm_reduce_src);
-            shmem_free(pwork);
-            shmem_free(psync);
+            //shmem_free(symm_reduce_dest);
+            //shmem_free(symm_reduce_src);
+            //shmem_free(pwork);
+            //shmem_free(psync);
         }
 
         inline int64_t N() { return _N; }
@@ -401,7 +400,7 @@ class ShmemML1D_Base {
 
     protected:
         void setup_psync() {
-            for (int i = 0; i < SHMEM_REDUCE_SYNC_SIZE; i++) {
+            for (int i = 0; i < SHMEMML_MAX(SHMEM_REDUCE_SYNC_SIZE, SHMEM_BCAST_SYNC_SIZE); i++) {
                 psync[i] = SHMEM_SYNC_VALUE;
             }
             shmem_barrier_all();
@@ -516,27 +515,27 @@ class ShmemML1D : public ShmemML1D_Base<T> {
         }
 
         void atomic_add(int64_t global_index, T val) override {
-            throw std::runtime_error("unsupported");
+            throw std::runtime_error("atomic_add unsupported");
         }
 
         T atomic_fetch_add(int64_t global_index, T val) override {
-            throw std::runtime_error("unsupported");
+            throw std::runtime_error("atomic_fetch_add unsupported");
         }
 
         T atomic_cas(int64_t global_index, T expected, T update_to) override {
-            throw std::runtime_error("unsupported");
+            throw std::runtime_error("atomic_cas unsupported");
         }
 
         void atomic_or(int64_t global_index, T mask) override {
-            throw std::runtime_error("unsupported");
+            throw std::runtime_error("atomic_or unsupported");
         }
 
         T max(T min_val) override {
-            throw std::runtime_error("unsupported");
+            throw std::runtime_error("max unsupported");
         }
 
         T sum(T zero_val) override {
-            throw std::runtime_error("unsupported");
+            throw std::runtime_error("sum unsupported");
         }
 
     private:
@@ -585,15 +584,15 @@ class ShmemML1D<long long> : public ShmemML1D_Base<long long> {
         }
 
         long long atomic_fetch_add(int64_t global_index, long long val) override {
-            throw std::runtime_error("unsupported");
+            throw std::runtime_error("long long unsupported");
         }
 
         long long atomic_cas(int64_t global_index, long long expected, long long update_to) override {
-            throw std::runtime_error("unsupported");
+            throw std::runtime_error("long long unsupported");
         }
 
         void atomic_or(int64_t global_index, long long mask) override {
-            throw std::runtime_error("unsupported");
+            throw std::runtime_error("long long unsupported");
         }
 
         long long max(long long min_val) override {
@@ -669,15 +668,21 @@ class ShmemML1D<int64_t> : public ShmemML1D_Base<int64_t> {
         }
 
         int64_t atomic_fetch_add(int64_t global_index, int64_t val) override {
-            throw std::runtime_error("unsupported");
+            int pe = global_index / _chunk_size;
+            int64_t offset = global_index % _chunk_size;
+            return shmem_int64_atomic_fetch_add(raw_slice() + offset, val, pe);
         }
 
         int64_t atomic_cas(int64_t global_index, int64_t expected, int64_t update_to) override {
-            throw std::runtime_error("unsupported");
+            int pe = global_index / _chunk_size;
+            int64_t offset = global_index % _chunk_size;
+            return shmem_int64_atomic_compare_swap(raw_slice() + offset, expected, update_to, pe);
         }
 
         void atomic_or(int64_t global_index, int64_t mask) override {
-            throw std::runtime_error("unsupported");
+            int pe = global_index / _chunk_size;
+            int64_t offset = global_index % _chunk_size;
+            shmem_int64_atomic_or(raw_slice() + offset, mask, pe);
         }
 
         int64_t max(int64_t min_val) override {
@@ -755,23 +760,23 @@ class ShmemML1D<uint32_t> : public ShmemML1D_Base<uint32_t> {
         }
 
         uint32_t atomic_fetch_add(int64_t global_index, uint32_t val) override {
-            throw std::runtime_error("unsupported");
+            throw std::runtime_error("uint32_t unsupported");
         }
 
         uint32_t atomic_cas(int64_t global_index, uint32_t expected, uint32_t update_to) override {
-            throw std::runtime_error("unsupported");
+            throw std::runtime_error("uint32_t unsupported");
         }
 
         void atomic_or(int64_t global_index, uint32_t mask) override {
-            throw std::runtime_error("unsupported");
+            throw std::runtime_error("uint32_t unsupported");
         }
 
         uint32_t max(uint32_t min_val) override {
-            throw std::runtime_error("unsupported");
+            throw std::runtime_error("uint32_t unsupported");
         }
 
         uint32_t sum(uint32_t zero_val) override {
-            throw std::runtime_error("unsupported");
+            throw std::runtime_error("uint32_t unsupported");
         }
 
     private:
@@ -811,27 +816,27 @@ class ShmemML1D<double> : public ShmemML1D_Base<double> {
         }
 
         void atomic_add(int64_t global_index, double val) override {
-            throw std::runtime_error("unsupported");
+            throw std::runtime_error("double unsupported");
         }
 
         double atomic_fetch_add(int64_t global_index, double val) override {
-            throw std::runtime_error("unsupported");
+            throw std::runtime_error("double unsupported");
         }
 
         double atomic_cas(int64_t global_index, double expected, double update_to) override {
-            throw std::runtime_error("unsupported");
+            throw std::runtime_error("double unsupported");
         }
 
         void atomic_or(int64_t global_index, double mask) override {
-            throw std::runtime_error("unsupported");
+            throw std::runtime_error("double unsupported");
         }
 
         double max(double min_val) override {
-            throw std::runtime_error("unsupported");
+            throw std::runtime_error("double unsupported");
         }
 
         double sum(double zero_val) override {
-            throw std::runtime_error("unsupported");
+            throw std::runtime_error("double unsupported");
         }
 
     private:
@@ -886,7 +891,7 @@ class ShmemML2D {
         }
 
         void update_from_arrow_record_batch(std::shared_ptr<arrow::RecordBatch> src) {
-            throw std::runtime_error("unsupported");
+            throw std::runtime_error("update_from_arrow_record_batch unsupported");
 #if 0
             std::shared_ptr<arrow::PrimitiveArray> src_arr =
                 std::dynamic_pointer_cast<arrow::PrimitiveArray, arrow::Array>(src);

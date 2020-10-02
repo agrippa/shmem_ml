@@ -1138,7 +1138,7 @@ mspace create_mspace(size_t capacity, int locked);
   bytes freed. After destruction, the results of access to all memory
   used by the space become undefined.
 */
-size_t destroy_mspace(mspace msp);
+size_t shmemml_destroy_mspace(mspace msp);
 
 /*
   create_mspace_with_base uses the memory supplied as the initial base
@@ -1149,7 +1149,7 @@ size_t destroy_mspace(mspace msp);
   Destroying this space will deallocate all additionally allocated
   space (if possible) but not the initial base.
 */
-mspace create_mspace_with_base(void* base, size_t capacity, int locked);
+mspace shmemml_create_mspace_with_base(void* base, size_t capacity, int locked);
 
 /*
   mspace_track_large_chunks controls whether requests for large chunks
@@ -1169,7 +1169,7 @@ int mspace_track_large_chunks(mspace msp, int enable);
   mspace_malloc behaves as malloc, but operates within
   the given space.
 */
-void* mspace_malloc(mspace msp, size_t bytes);
+void* shmemml_mspace_malloc(mspace msp, size_t bytes);
 
 /*
   mspace_free behaves as free, but operates within
@@ -1179,7 +1179,7 @@ void* mspace_malloc(mspace msp, size_t bytes);
   free may be called instead of mspace_free because freed chunks from
   any space are handled by their originating spaces.
 */
-void mspace_free(mspace msp, void* mem);
+void shmemml_mspace_free(mspace msp, void* mem);
 
 /*
   mspace_realloc behaves as realloc, but operates within
@@ -1190,7 +1190,7 @@ void mspace_free(mspace msp, void* mem);
   realloced chunks from any space are handled by their originating
   spaces.
 */
-void* mspace_realloc(mspace msp, void* mem, size_t newsize);
+void* shmemml_mspace_realloc(mspace msp, void* mem, size_t newsize);
 
 /*
   mspace_calloc behaves as calloc, but operates within
@@ -3635,14 +3635,14 @@ static void internal_malloc_stats(mstate m) {
 /* Relays to internal calls to malloc/free from realloc, memalign etc */
 
 #if ONLY_MSPACES
-#define internal_malloc(m, b) mspace_malloc(m, b)
-#define internal_free(m, mem) mspace_free(m,mem);
+#define internal_malloc(m, b) shmemml_mspace_malloc(m, b)
+#define internal_free(m, mem) shmemml_mspace_free(m,mem);
 #else /* ONLY_MSPACES */
 #if MSPACES
 #define internal_malloc(m, b)\
-   (m == gm)? dlmalloc(b) : mspace_malloc(m, b)
+   (m == gm)? dlmalloc(b) : shmemml_mspace_malloc(m, b)
 #define internal_free(m, mem)\
-   if (m == gm) dlfree(mem); else mspace_free(m,mem);
+   if (m == gm) dlfree(mem); else shmemml_mspace_free(m,mem);
 #else /* MSPACES */
 #define internal_malloc(m, b) dlmalloc(b)
 #define internal_free(m, mem) dlfree(mem)
@@ -4987,7 +4987,7 @@ mspace create_mspace(size_t capacity, int locked) {
   return (mspace)m;
 }
 
-mspace create_mspace_with_base(void* base, size_t capacity, int locked) {
+mspace shmemml_create_mspace_with_base(void* base, size_t capacity, int locked) {
   mstate m = 0;
   size_t msize;
   ensure_initialization();
@@ -5016,7 +5016,7 @@ int mspace_track_large_chunks(mspace msp, int enable) {
   return ret;
 }
 
-size_t destroy_mspace(mspace msp) {
+size_t shmemml_destroy_mspace(mspace msp) {
   size_t freed = 0;
   mstate ms = (mstate)msp;
   if (ok_magic(ms)) {
@@ -5043,7 +5043,7 @@ size_t destroy_mspace(mspace msp) {
 */
 
 
-void* mspace_malloc(mspace msp, size_t bytes) {
+void* shmemml_mspace_malloc(mspace msp, size_t bytes) {
   mstate ms = (mstate)msp;
   if (!ok_magic(ms)) {
     USAGE_ERROR_ACTION(ms,ms);
@@ -5157,7 +5157,7 @@ void* mspace_malloc(mspace msp, size_t bytes) {
   return 0;
 }
 
-void mspace_free(mspace msp, void* mem) {
+void shmemml_mspace_free(mspace msp, void* mem) {
   if (mem != 0) {
     mchunkptr p  = mem2chunk(mem);
 #if FOOTERS
@@ -5278,12 +5278,12 @@ void* mspace_calloc(mspace msp, size_t n_elements, size_t elem_size) {
   return mem;
 }
 
-void* mspace_realloc(mspace msp, void* oldmem, size_t bytes) {
+void* shmemml_mspace_realloc(mspace msp, void* oldmem, size_t bytes) {
   if (oldmem == 0)
-    return mspace_malloc(msp, bytes);
+    return shmemml_mspace_malloc(msp, bytes);
 #ifdef REALLOC_ZERO_BYTES_FREES
   if (bytes == 0) {
-    mspace_free(msp, oldmem);
+    shmemml_mspace_free(msp, oldmem);
     return 0;
   }
 #endif /* REALLOC_ZERO_BYTES_FREES */

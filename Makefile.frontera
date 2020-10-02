@@ -1,27 +1,36 @@
 CC=oshcc
 CXX=oshcxx
-FLAGS=-g -O0 -Isrc -Wall -Wextra -std=c++11 -Isrc -Isrc/dlmalloc \
-	  -I$(ARROW_HOME)/include -DMSPACES=1 -DONLY_MSPACES=1 \
-	  -DHAVE_MORECORE=0 -DHAVE_MMAP=0 -DHAVE_MREMAP=0 -DUSE_LOCKS=0 \
-	  -DFOOTERS=1 -I$(SHMEM_HOME)/include -Isrc/crc
-LINK_FLAGS=-lshmem_ml -larrow -lshmem -Lbin -L$(ARROW_HOME)/lib64 -L$(SHMEM_HOME)/lib -lstdc++
+FLAGS=-g -O0 -Isrc/shmem_ml -Wall -Wextra -std=c++11 -Isrc/shmem_ml/dlmalloc -Isrc/shmem_ml/crc \
+	  -I$(ARROW_HOME)/include $(shell python3-config --includes) \
+	  -DMSPACES=1 -DONLY_MSPACES=1 -DHAVE_MORECORE=0 -DUSE_LOCKS=0 -DFOOTERS=1 -I$(OPENSHMEM_HOME)/include \
+	  -I$(shell python -c 'import numpy; print(numpy.get_include())')
+LINK_FLAGS=-lshmem_ml -larrow -larrow_python -lshmem -Lbin -L$(ARROW_HOME)/lib -L$(SHMEM_HOME)/lib -lstdc++ -lzstd -lbz2 -lutf8proc -lbrotlienc -lbrotlidec -lbrotlicommon -llz4 $(shell python3-config --ldflags)
+
+libs: bin/libshmem_ml.a src/shmem_ml/core.so
+
+python: libs
+	python setup.py build_ext --inplace --force
 
 bin/libshmem_ml.a: bin/dlmalloc.o bin/shmem_ml.o bin/ShmemMemoryPool.o bin/mailbox.o bin/mailbox_buffer.o
 	ar rcs $@ $^
 
-bin/dlmalloc.o: src/dlmalloc/dlmalloc.c
+src/shmem_ml/core.so: bin/dlmalloc.o bin/shmem_ml.o bin/ShmemMemoryPool.o bin/mailbox.o bin/mailbox_buffer.o
+	$(CC) $(FLAGS) -shared $^ -o $@ -larrow -larrow_python -Lbin -L$(ARROW_HOME)/lib $(shell python3-config --ldflags) -L$(OPENSHMEM_HOME)/lib64
+
+
+bin/dlmalloc.o: src/shmem_ml/dlmalloc/dlmalloc.c
 	$(CXX) $(FLAGS) -fPIC -c -o $@ $^
 
-bin/shmem_ml.o: src/shmem_ml.cpp
+bin/shmem_ml.o: src/shmem_ml/shmem_ml.cpp
 	$(CXX) $(FLAGS) -fPIC -c -o $@ $^
 
-bin/ShmemMemoryPool.o: src/ShmemMemoryPool.cpp
+bin/ShmemMemoryPool.o: src/shmem_ml/ShmemMemoryPool.cpp
 	$(CXX) $(FLAGS) -fPIC -c -o $@ $^
 
-bin/mailbox.o: src/mailbox.cpp
+bin/mailbox.o: src/shmem_ml/mailbox.cpp
 	$(CXX) $(FLAGS) -fPIC -c -o $@ $^
 
-bin/mailbox_buffer.o: src/mailbox_buffer.cpp
+bin/mailbox_buffer.o: src/shmem_ml/mailbox_buffer.cpp
 	$(CXX) $(FLAGS) -fPIC -c -o $@ $^
 
 bin/bfs: example/bfs.cpp \
@@ -39,4 +48,4 @@ bin/save_load_get_set: test/save_load_get_set.cpp bin/libshmem_ml.a
 	$(CXX) $(FLAGS) -o $@ test/save_load_get_set.cpp $(LINK_FLAGS)
 
 clean:
-	rm -f bin/*.o bin/*.a
+	rm -f bin/* PyShmemML.cpython-37m-x86_64-linux-gnu.so src/shmem_ml/core.so src/shmem_ml/PyShmemML.cpp

@@ -3,6 +3,8 @@
 import pyarrow
 from pyarrow.lib cimport *
 
+import sys
+import atexit
 import numpy as np
 import sklearn
 import sklearn.linear_model
@@ -16,12 +18,17 @@ from shmem_ml cimport shmem_n_pes as c_shmem_n_pes
 from shmem_ml cimport ShmemML1D, ReplicatedShmemML1D, ShmemML2D
 
 
-def shmem_ml_init():
-    c_shmem_ml_init()
-    tmp = pyarrow.array([])
-
 def shmem_ml_finalize():
     c_shmem_ml_finalize()
+
+
+def shmem_ml_init():
+    c_shmem_ml_init()
+    # Force initialization of pyarrow so that it doesn't happen in a performance
+    # critical section.
+    tmp = pyarrow.array([])
+
+    # atexit.register(shmem_ml_finalize)
 
 
 cdef class PyShmemML1DD:
@@ -206,3 +213,6 @@ def pe():
 
 def npes():
     return c_shmem_n_pes()
+
+# Initialize the runtime when it is imported
+shmem_ml_init()

@@ -15,8 +15,10 @@ On Cori:
 
     export LD_LIBRARY_PATH=$OPENSHMEM_HOME/lib64:$LD_LIBRARY_PATH
 
+    source activate pyarrow-dev
+
     export ARROW_HOME=$HOME/.conda/envs/pyarrow-dev/
-    export LD_LIBRARY_PATH=/lib64:$LD_LIBRARY_PATH:$ARROW_HOME/lib
+    export PYTHONPATH=$HOME/shmem_ml/src:$PYTHONPATH
 
 ## Dependencies:
 

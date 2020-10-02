@@ -1,7 +1,8 @@
 CC=g++
 FLAGS=-g -O3 -Isrc/shmem_ml -Wall -Wextra -std=c++11 -Isrc/shmem_ml/dlmalloc -Isrc/shmem_ml/crc \
-	  -I$(ARROW_HOME)/include -I$(PYBIND11_HOME)/include $(shell python3-config --includes) \
-	  -DMSPACES=1 -DONLY_MSPACES=1 -DHAVE_MORECORE=0 -DUSE_LOCKS=0 -DFOOTERS=1 -I$(OPENSHMEM_HOME)/include -I$(shell python -c 'import numpy; print(numpy.get_include())')
+	  -I$(ARROW_HOME)/include $(shell python3-config --includes) \
+	  -DMSPACES=1 -DONLY_MSPACES=1 -DHAVE_MORECORE=0 -DUSE_LOCKS=0 -DFOOTERS=1 -I$(OPENSHMEM_HOME)/include \
+	  -I$(shell python -c 'import numpy; print(numpy.get_include())')
 LINK_FLAGS=-lshmem_ml -larrow -larrow_python -Lbin -L$(ARROW_HOME)/lib $(shell python3-config --ldflags) -L$(OPENSHMEM_HOME)/lib64 -lsma -lzstd
 
 libs: bin/libshmem_ml.a src/shmem_ml/core.so

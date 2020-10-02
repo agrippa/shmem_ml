@@ -20,12 +20,12 @@ class ShmemMemoryPool : public arrow::MemoryPool {
             _pool_size = pool_size;
             _pool = shmem_malloc(pool_size);
             assert(_pool);
-            _allocator = create_mspace_with_base(_pool, _pool_size, 0);
+            _allocator = shmemml_create_mspace_with_base(_pool, _pool_size, 0);
             assert(_allocator);
         }
 
         ~ShmemMemoryPool() override {
-            destroy_mspace(_allocator);
+            shmemml_destroy_mspace(_allocator);
             shmem_free(_pool);
         }
 
@@ -35,7 +35,7 @@ class ShmemMemoryPool : public arrow::MemoryPool {
                 return arrow::Status::OK();
             }
 
-            void *ptr = mspace_malloc(_allocator, size);
+            void *ptr = shmemml_mspace_malloc(_allocator, size);
             if (ptr) {
                 _bytes_allocated += size;
                 *out = (uint8_t*)ptr;
@@ -58,8 +58,11 @@ class ShmemMemoryPool : public arrow::MemoryPool {
                 return arrow::Status::OK();
             }
 
-            void *new_ptr = mspace_realloc(_allocator, *ptr, new_size);
+            void *new_ptr = shmemml_mspace_realloc(_allocator, *ptr, new_size);
+            // void *new_ptr = shmemml_mspace_malloc(_allocator, new_size);
             if (new_ptr) {
+                // memcpy(new_ptr, *ptr, old_size < new_size ? old_size : new_size);
+                // shmemml_mspace_free(_allocator, *ptr);
                 _bytes_allocated += (new_size - old_size);
                 *ptr = (uint8_t*)new_ptr;
                 return arrow::Status::OK();
@@ -73,7 +76,7 @@ class ShmemMemoryPool : public arrow::MemoryPool {
                 assert(size == 0);
             } else {
                 _bytes_allocated -= size;
-                mspace_free(_allocator, buffer);
+                shmemml_mspace_free(_allocator, buffer);
             }
         }
 
