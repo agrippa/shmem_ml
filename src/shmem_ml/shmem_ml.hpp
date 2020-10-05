@@ -7,6 +7,7 @@
 #include <ShmemMemoryPool.hpp>
 #include <arrow/array.h>
 #include <arrow/record_batch.h>
+#include <arrow/table.h>
 #include <arrow/array/builder_binary.h>
 #include <arrow/array/builder_primitive.h>
 #include <arrow/io/file.h>
@@ -166,10 +167,10 @@ class ShmemML1D_Base {
         }
 
         ~ShmemML1D_Base() {
-            //shmem_free(symm_reduce_dest);
-            //shmem_free(symm_reduce_src);
-            //shmem_free(pwork);
-            //shmem_free(psync);
+            shmem_free(symm_reduce_dest);
+            shmem_free(symm_reduce_src);
+            shmem_free(pwork);
+            shmem_free(psync);
         }
 
         inline int64_t N() { return _N; }
@@ -857,6 +858,7 @@ class ShmemML2D {
             int npes = shmem_n_pes();
             _rows_per_pe = (_M + npes - 1) / npes;
 
+            // Construct a simple schema for this table
             std::vector<std::shared_ptr<arrow::Field>> fields;
             for (int i = 0; i < N; i++) {
                 std::stringstream ss;
@@ -866,10 +868,12 @@ class ShmemML2D {
             std::shared_ptr<arrow::Schema> schema = arrow::schema(fields);
 
             std::vector<std::shared_ptr<arrow::Array>> arrs;
+            std::vector<std::shared_ptr<arrow::ChunkedArray>> columns;
             for (int i = 0; i < N; i++) {
                 std::shared_ptr<arrow::NumericArray<arrow::DoubleType>> arr;
 
-                arrow::NumericBuilder<arrow::DoubleType> builder(arrow::float64(), pool);
+                arrow::NumericBuilder<arrow::DoubleType> builder(
+                        arrow::float64(), pool);
                 CHECK_ARROW(builder.Reserve(_rows_per_pe));
                 for (int64_t i = 0; i < _rows_per_pe; i++) {
                     CHECK_ARROW(builder.Append(0));
@@ -877,38 +881,72 @@ class ShmemML2D {
                 builder.Finish(&arr);
                 arr->ValidateFull();
                 arrs.push_back(arr);
+
+                columns.push_back(std::make_shared<arrow::ChunkedArray>(arr));
             }
 
-            _arrs = arrow::RecordBatch::Make(schema, _rows_per_pe, arrs);
+            _arrs = arrow::Table::Make(schema, columns, _rows_per_pe);
             _arrs->Validate();
         }
 
         int64_t N() { return _N; }
         int64_t M() { return _M; }
+        int64_t rows_per_pe() { return _rows_per_pe; }
 
-        std::shared_ptr<arrow::RecordBatch> get_arrow_record_batch() {
+        double get(int64_t row, int64_t col) {
+            assert(col < _arrs->num_columns());
+            std::shared_ptr<arrow::ChunkedArray> col_chunked = _arrs->column(col);
+            std::shared_ptr<arrow::Array> col_arr = col_chunked->chunk(0);
+            assert(col_chunked->length() == col_arr->length()); // Single-chunk array
+
+            std::shared_ptr<arrow::PrimitiveArray> src_arr =
+                std::dynamic_pointer_cast<arrow::PrimitiveArray, arrow::Array>(col_arr);
+            assert(src_arr);
+
+            double* symm = (double*)src_arr->values()->data();
+
+            int pe = row / _rows_per_pe;
+            int64_t offset = row % _rows_per_pe;
+
+            double val;
+            shmem_getmem(&val, symm + offset, sizeof(val), pe);
+            return val;
+        }
+
+        std::shared_ptr<arrow::Table> get_arrow_table() {
             return _arrs;
         }
 
-        void update_from_arrow_record_batch(std::shared_ptr<arrow::RecordBatch> src) {
-            throw std::runtime_error("update_from_arrow_record_batch unsupported");
-#if 0
-            std::shared_ptr<arrow::PrimitiveArray> src_arr =
-                std::dynamic_pointer_cast<arrow::PrimitiveArray, arrow::Array>(src);
-            assert(src_arr);
+        void update_from_arrow_table(std::shared_ptr<arrow::Table> src) {
+            assert(src->num_columns() == _arrs->num_columns());
+            for (int c = 0; c < src->num_columns(); c++) {
+                assert(_arrs->column(c)->length() == _arrs->column(c)->chunk(0)->length());
+                assert(src->column(c)->length() == src->column(c)->chunk(0)->length());
 
-            T* dst = raw_slice();
-            T* typed_src = (T*)src_arr->values()->data();
+                std::shared_ptr<arrow::Array> dst_arr = _arrs->column(c)->chunk(0);
+                std::shared_ptr<arrow::Array> src_arr = src->column(c)->chunk(0);
+                assert(src_arr->length() == dst_arr->length());
 
-            for (int64_t i = 0; i < src->length(); i++) {
-                dst[i] = typed_src[i];
+                std::shared_ptr<arrow::NumericArray<arrow::DoubleType>> src_prim_arr =
+                    std::dynamic_pointer_cast<arrow::NumericArray<arrow::DoubleType>, arrow::Array>(src_arr);
+                assert(src_prim_arr);
+
+                std::shared_ptr<arrow::NumericArray<arrow::DoubleType>> dst_prim_arr =
+                    std::dynamic_pointer_cast<arrow::NumericArray<arrow::DoubleType>, arrow::Array>(dst_arr);
+                assert(dst_prim_arr);
+
+                double* src_symm = (double*)src_prim_arr->values()->data();
+                double* dst_symm = (double*)dst_prim_arr->values()->data();
+
+                for (int i = 0; i < src_arr->length(); i++) {
+                    dst_symm[i] = src_symm[i];
+                }
             }
-#endif
         }
 
 
     private:
-        std::shared_ptr<arrow::RecordBatch> _arrs;
+        std::shared_ptr<arrow::Table> _arrs;
         int64_t _M, _N;
         int64_t _rows_per_pe;
         ShmemMemoryPool* pool;
@@ -1002,9 +1040,9 @@ class ReplicatedShmemML1D : public ShmemML1D<T> {
             return old;
         }
 
-        void atomic_or(int64_t global_index, T mask) {
-            this->raw_slice()[global_index] |= mask;
-        }
+        // void atomic_or(int64_t global_index, T mask) {
+        //     this->raw_slice()[global_index] |= mask;
+        // }
 
         T sum(T zero_val) {
             T s = zero_val;

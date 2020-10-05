@@ -6,6 +6,7 @@ from pyarrow.lib cimport *
 import sys
 import atexit
 import numpy as np
+import pandas as pd
 import sklearn
 import sklearn.linear_model
 from sklearn.linear_model import SGDRegressor as SK_SGDRegressor
@@ -81,16 +82,28 @@ cdef class PyShmemML2DD:
     def M(self):
         return self.c_mat.M()
 
-    def get_local_arrow_record_batch(self):
-        return pyarrow_wrap_batch(self.c_mat.get_arrow_record_batch())
+    def rows_per_pe(self):
+        return self.c_mat.rows_per_pe()
 
-    def update_from_arrow(self, arrow_record_batch):
-        cdef shared_ptr[CRecordBatch] batch = pyarrow_unwrap_batch(arrow_record_batch)
-        self.c_mat.update_from_arrow_record_batch(batch)
+    def get(self, int64_t row, int64_t col):
+        return self.c_mat.get(row, col)
+
+    def get_local_arrow_table(self):
+        return pyarrow_wrap_table(self.c_mat.get_arrow_table())
+
+    def update_from_arrow(self, arrow_table):
+        cdef shared_ptr[CTable] tab = pyarrow_unwrap_table(arrow_table)
+        self.c_mat.update_from_arrow_table(tab)
 
 
 cdef class PyReplicatedShmemML1DD:
     cdef ReplicatedShmemML1D[double]* c_vec
+
+    def __cinit__(self, int64_t N):
+        self.c_vec = new ReplicatedShmemML1D[double](N)
+
+    def __dealloc__(self):
+        del self.c_vec
 
     def update_from_arrow(self, arrow_arr):
         cdef shared_ptr[CArray] arr = pyarrow_unwrap_array(arrow_arr)
@@ -102,15 +115,26 @@ cdef class PyReplicatedShmemML1DD:
     def get_local_arrow_array(self):
         return pyarrow_wrap_array(self.c_vec.get_arrow_array())
 
+    def bcast(self, src_rank):
+        self.c_vec.bcast(src_rank)
+
 
 def rand(vec):
-    assert isinstance(vec, PyShmemML1DD)
-    arr = vec.get_local_arrow_array()
-    np_arr = arr.to_numpy(zero_copy_only=False, writable=True)
-    np_arr[:] = np.random.rand(np_arr.shape[0])
-    pyarr = pyarrow.array(np_arr)
-    vec.update_from_arrow(pyarr)
-    return vec
+    if isinstance(vec, PyShmemML1DD):
+        arr = vec.get_local_arrow_array()
+        np_arr = arr.to_numpy(zero_copy_only=False, writable=True)
+        np_arr[:] = np.random.rand(np_arr.shape[0])
+        pyarr = pyarrow.array(np_arr)
+        vec.update_from_arrow(pyarr)
+        return vec
+    elif isinstance(vec, PyShmemML2DD):
+        np_arr = np.random.rand(vec.rows_per_pe(), vec.N())
+        pd_arr = pd.DataFrame(np_arr)
+        arrow_table = pyarrow.Table.from_pandas(pd_arr)
+        vec.update_from_arrow(arrow_table)
+        return vec
+    else:
+        assert False, str(type(vec))
 
 
 class SGDRegressor:
@@ -149,9 +173,8 @@ class SGDRegressor:
         assert isinstance(x, PyShmemML2DD)
         assert isinstance(y, PyShmemML1DD)
 
-        x_arr = x.get_local_arrow_record_batch()
-        x_arr = x_arr.to_pandas(zero_copy_only=True)
-        print('type of x_arr = ' + str(type(x_arr)))
+        x_arr = x.get_local_arrow_table()
+        x_arr = x_arr.to_pandas(zero_copy_only=True, split_blocks=True)
 
         y_arr = y.get_local_arrow_array()
         y_arr = y_arr.to_numpy(zero_copy_only=True)
@@ -197,12 +220,13 @@ class SGDRegressor:
                     all_coef_grads, all_intercept_grads)
 
 
-    def transform(self, x):
+    def predict(self, x):
         assert isinstance(x, PyShmemML2DD)
-        x_arr = x.get_local_arrow_record_batch().to_pandas(zero_copy_only=True)
-        pred = self.model.transform(x_arr)
+        x_arr = x.get_local_arrow_table().to_pandas(zero_copy_only=True, split_blocks=True)
 
-        dist_pred = PyShmemML1DD(x.N())
+        pred = self.model.predict(x_arr)
+
+        dist_pred = PyShmemML1DD(x.M())
         dist_pred.update_from_arrow(pyarrow.array(pred))
         return dist_pred
 

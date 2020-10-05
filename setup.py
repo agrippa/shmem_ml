@@ -26,7 +26,8 @@ extensions = [
                           os.path.join(os.getenv('OPENPMIX_HOME'), 'lib'),
                           os.path.join(os.getenv('ARROW_HOME'), 'lib'),
                           './bin'],
-            define_macros=[("NPY_NO_DEPRECATED_API", "NPY_1_7_API_VERSION")])
+            define_macros=[("NPY_NO_DEPRECATED_API", "NPY_1_7_API_VERSION")],
+            undef_macros=['NDEBUG'])
         ]
 
 setup(name='shmem_ml',

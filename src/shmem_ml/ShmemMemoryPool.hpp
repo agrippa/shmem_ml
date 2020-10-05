@@ -59,10 +59,7 @@ class ShmemMemoryPool : public arrow::MemoryPool {
             }
 
             void *new_ptr = shmemml_mspace_realloc(_allocator, *ptr, new_size);
-            // void *new_ptr = shmemml_mspace_malloc(_allocator, new_size);
             if (new_ptr) {
-                // memcpy(new_ptr, *ptr, old_size < new_size ? old_size : new_size);
-                // shmemml_mspace_free(_allocator, *ptr);
                 _bytes_allocated += (new_size - old_size);
                 *ptr = (uint8_t*)new_ptr;
                 return arrow::Status::OK();

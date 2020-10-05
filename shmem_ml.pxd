@@ -2,7 +2,7 @@ import numpy as np
 # from numpy cimport int64_t
 import pyarrow
 from libcpp.memory cimport shared_ptr
-from pyarrow.includes.libarrow cimport CArray, CRecordBatch
+from pyarrow.includes.libarrow cimport CArray, CRecordBatch, CTable
 
 np.import_array()
 
@@ -38,8 +38,10 @@ cdef extern from "shmem_ml.hpp":
         ShmemML2D(int64_t, int64_t) except +
         int64_t M()
         int64_t N()
-        shared_ptr[CRecordBatch] get_arrow_record_batch()
-        void update_from_arrow_record_batch(shared_ptr[CRecordBatch] src)
+        int64_t rows_per_pe()
+        shared_ptr[CTable] get_arrow_table()
+        void update_from_arrow_table(shared_ptr[CTable] src)
+        float get(int64_t row, int64_t col)
 
 
 cdef extern from "shmem.h":
