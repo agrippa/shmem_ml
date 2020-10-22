@@ -66,6 +66,25 @@ cdef class PyShmemML1DD:
         cdef shared_ptr[CArray] arr = pyarrow_unwrap_array(arrow_arr)
         self.c_vec.update_from_arrow_array(arr)
 
+    def gather(self):
+        # Very inefficient (for now)
+        gathered = np.zeros(self.N())
+        for i in range(self.N()):
+            gathered[i] = self.get(i)
+        return gathered
+
+    def apply(self, f):
+        arrow_arr = pyarrow_wrap_array(self.c_vec.get_arrow_array())
+        np_arr = arrow_arr.to_numpy(zero_copy_only=True, writable=False)
+        out_np_arr = np.zeros(len(np_arr))
+        for i in range(len(np_arr)):
+            out_np_arr[i] = f(i, np_arr[i])
+
+        new_dist_arr = PyShmemML1DD(self.N())
+        new_dist_arr.update_from_arrow(pyarrow.array(out_np_arr))
+        new_dist_arr.sync()
+        return new_dist_arr
+
 
 cdef class PyShmemML2DD:
     cdef ShmemML2D* c_mat
@@ -82,6 +101,9 @@ cdef class PyShmemML2DD:
     def M(self):
         return self.c_mat.M()
 
+    def sync(self):
+        self.c_mat.sync()
+
     def rows_per_pe(self):
         return self.c_mat.rows_per_pe()
 
@@ -94,6 +116,27 @@ cdef class PyShmemML2DD:
     def update_from_arrow(self, arrow_table):
         cdef shared_ptr[CTable] tab = pyarrow_unwrap_table(arrow_table)
         self.c_mat.update_from_arrow_table(tab)
+
+    def gather(self):
+        # Very inefficient (for now)
+        gathered = np.zeros((self.M(), self.N()))
+        for i in range(self.M()):
+            for j in range(self.N()):
+                gathered[i, j] = self.get(i, j)
+        return gathered
+
+    def apply(self, f):
+        arrow_table = self.get_local_arrow_table()
+        arrow_table = arrow_table.to_pandas(zero_copy_only=True, split_blocks=True)
+        result = pd.DataFrame(np.zeros((arrow_table.shape)))
+
+        for i in range(arrow_table.shape[0]):
+            for j in range(arrow_table.shape[1]):
+                result.iloc[i, j] = f(i, j, arrow_table.iloc[i, j])
+        dist_mat = PyShmemML2DD(self.M(), self.N())
+        dist_mat.update_from_arrow(pyarrow.table(result))
+        dist_mat.sync()
+        return dist_mat
 
 
 cdef class PyReplicatedShmemML1DD:
@@ -202,6 +245,8 @@ class SGDRegressor:
             after_coef, after_intercept = self._copy_coef_intercept()
             coef_grad, intercept_grad = self._compute_coef_intercept_grad(
                     prev_coef, prev_intercept, after_coef, after_intercept)
+            coef_grad = coef_grad / npes()
+            intercept_grad = intercept_grad / npes()
 
             arrow_coef_grad = pyarrow.array(coef_grad)
             arrow_intercept_grad = pyarrow.array(intercept_grad)

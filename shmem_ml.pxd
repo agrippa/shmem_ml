@@ -42,6 +42,7 @@ cdef extern from "shmem_ml.hpp":
         shared_ptr[CTable] get_arrow_table()
         void update_from_arrow_table(shared_ptr[CTable] src)
         float get(int64_t row, int64_t col)
+        void sync()
 
 
 cdef extern from "shmem.h":

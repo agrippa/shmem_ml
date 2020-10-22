@@ -892,6 +892,9 @@ class ShmemML2D {
         int64_t N() { return _N; }
         int64_t M() { return _M; }
         int64_t rows_per_pe() { return _rows_per_pe; }
+        void sync() {
+            shmem_barrier_all();
+        }
 
         double get(int64_t row, int64_t col) {
             assert(col < _arrs->num_columns());
