@@ -1116,10 +1116,6 @@ class ReplicatedShmemML1D : public ShmemML1D<T> {
             return old;
         }
 
-        // void atomic_or(int64_t global_index, T mask) {
-        //     this->raw_slice()[global_index] |= mask;
-        // }
-
         T sum(T zero_val) {
             T s = zero_val;
             T* slice = this->raw_slice();
@@ -1163,6 +1159,12 @@ void ReplicatedShmemML1D<int>::reduce_all_or();
 
 template<>
 void ReplicatedShmemML1D<unsigned>::reduce_all_or();
+
+template<>
+void ReplicatedShmemML1D<unsigned>::reduce_all_sum();
+
+template<>
+void ReplicatedShmemML1D<unsigned>::bcast(int src_rank);
 
 template<>
 void ReplicatedShmemML1D<double>::reduce_all_sum();

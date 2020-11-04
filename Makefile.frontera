@@ -6,7 +6,7 @@ FLAGS=-g -O3 -Isrc/shmem_ml -Wall -Wextra -std=c++11 -Isrc/shmem_ml/dlmalloc -Is
 	  -I$(shell python -c 'import numpy; print(numpy.get_include())')
 LINK_FLAGS=-lshmem_ml -larrow -larrow_python -lshmem -Lbin -L$(ARROW_HOME)/lib -L$(SHMEM_HOME)/lib -lstdc++ -lzstd -lbz2 -lutf8proc -lbrotlienc -lbrotlidec -lbrotlicommon -llz4 $(shell python3-config --ldflags)
 
-tests: bin/save_load_get_set bin/shmem_ml_1d
+tests: bin/save_load_get_set bin/shmem_ml_1d bin/shmem_replicated_1d
 
 libs: bin/libshmem_ml.a src/shmem_ml/core.so
 
@@ -51,6 +51,9 @@ bin/save_load_get_set: test/save_load_get_set.cpp bin/libshmem_ml.a
 
 bin/shmem_ml_1d: test/shmem_ml_1d.cpp bin/libshmem_ml.a
 	$(CXX) $(FLAGS) -o $@ test/shmem_ml_1d.cpp $(LINK_FLAGS)
+
+bin/shmem_replicated_1d: test/shmem_replicated_1d.cpp bin/libshmem_ml.a
+	$(CXX) $(FLAGS) -o $@ test/shmem_replicated_1d.cpp $(LINK_FLAGS)
 
 clean:
 	rm -f bin/* PyShmemML.cpython-37m-x86_64-linux-gnu.so src/shmem_ml/core.so src/shmem_ml/PyShmemML.cpp

@@ -43,3 +43,6 @@ echo
 echo "shmem_ml_1d"
 srun $SLURM_ARGS $HOME/shmem_ml/bin/shmem_ml_1d
 echo
+echo "shmem_replicated_1d"
+srun $SLURM_ARGS $HOME/shmem_ml/bin/shmem_replicated_1d
+echo
