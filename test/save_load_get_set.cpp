@@ -1,8 +1,9 @@
 #include <shmem_ml.hpp>
 
-int main(int argc, char **argv) {
+int main() {
     shmem_init();
     int pe = shmem_my_pe();
+    int npes = shmem_n_pes();
 
     {
         int64_t n = 12345;
@@ -34,7 +35,9 @@ int main(int argc, char **argv) {
 
     shmem_finalize();
 
-    printf("PE %d success\n", pe);
+    if (pe == 0) {
+        printf("Success (%d PEs)\n", npes);
+    }
 
     return 0;
 }

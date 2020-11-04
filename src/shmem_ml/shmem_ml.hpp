@@ -112,6 +112,7 @@ class ShmemML1D_Base {
                 , atomics_msg_1d_result_handler<T> _atomics_cb = NULL
 #endif
                 ) {
+            assert(sizeof(int64_t) == sizeof(double));
             _N = N;
             int npes = shmem_n_pes();
             _chunk_size = (_N + npes - 1) / npes;
@@ -135,7 +136,7 @@ class ShmemML1D_Base {
             if (getenv("SHMEM_ML_MAX_MAILBOX_BUFFERS")) {
                 max_mailbox_buffers = atoi(getenv("SHMEM_ML_MAX_MAILBOX_BUFFERS"));
             }
-            unsigned n_mailbox_buffers = npes;
+            int n_mailbox_buffers = npes;
             if (n_mailbox_buffers < 256) n_mailbox_buffers = 256;
             if (max_mailbox_buffers != -1 && n_mailbox_buffers > max_mailbox_buffers) {
                 n_mailbox_buffers = max_mailbox_buffers;
@@ -167,6 +168,7 @@ class ShmemML1D_Base {
         }
 
         ~ShmemML1D_Base() {
+            mailbox_destroy(&atomics_mailbox);
             shmem_free(symm_reduce_dest);
             shmem_free(symm_reduce_src);
             shmem_free(pwork);
@@ -343,7 +345,7 @@ class ShmemML1D_Base {
             free(buf);
         }
 
-        static ShmemML1D_Base<T>* load(const char *filename) {
+        static ShmemML1D<T>* load(const char *filename) {
             shmem_barrier_all();
 
             arrow::Result<std::shared_ptr<arrow::io::ReadableFile>> err =
@@ -355,7 +357,7 @@ class ShmemML1D_Base {
             arrow::Result<int64_t> read = stream->Read(sizeof(N), &N);
             assert(read.ValueOrDie() == sizeof(N));
 
-            ShmemML1D_Base<T>* new_arr = new ShmemML1D_Base<T>(N);
+            ShmemML1D<T>* new_arr = new ShmemML1D<T>(N);
 
             if (shmem_my_pe() == 0) {
                 size_t nbuf = 1024 * 1024;
@@ -477,9 +479,6 @@ class ShmemML1D_Base {
 #endif
 };
 
-// template<typename T>
-// class ShmemML1D : public ShmemML1D_Base<T> { };
-
 template<typename T>
 class ShmemML1D : public ShmemML1D_Base<T> {
     public:
@@ -585,7 +584,9 @@ class ShmemML1D<long long> : public ShmemML1D_Base<long long> {
         }
 
         long long atomic_fetch_add(int64_t global_index, long long val) override {
-            throw std::runtime_error("long long unsupported");
+            int pe = global_index / _chunk_size;
+            int64_t offset = global_index % _chunk_size;
+            return shmem_longlong_atomic_fetch_add(raw_slice() + offset, val, pe);
         }
 
         long long atomic_cas(int64_t global_index, long long expected, long long update_to) override {
@@ -761,23 +762,51 @@ class ShmemML1D<uint32_t> : public ShmemML1D_Base<uint32_t> {
         }
 
         uint32_t atomic_fetch_add(int64_t global_index, uint32_t val) override {
-            throw std::runtime_error("uint32_t unsupported");
+            int pe = global_index / _chunk_size;
+            int64_t offset = global_index % _chunk_size;
+            return shmem_uint32_atomic_fetch_add(raw_slice() + offset, val, pe);
         }
 
         uint32_t atomic_cas(int64_t global_index, uint32_t expected, uint32_t update_to) override {
-            throw std::runtime_error("uint32_t unsupported");
+            int pe = global_index / _chunk_size;
+            int64_t offset = global_index % _chunk_size;
+            return shmem_uint32_atomic_compare_swap(raw_slice() + offset, expected, update_to, pe);
         }
 
         void atomic_or(int64_t global_index, uint32_t mask) override {
-            throw std::runtime_error("uint32_t unsupported");
+            int pe = global_index / _chunk_size;
+            int64_t offset = global_index % _chunk_size;
+            shmem_uint32_atomic_or(raw_slice() + offset, mask, pe);
         }
 
         uint32_t max(uint32_t min_val) override {
-            throw std::runtime_error("uint32_t unsupported");
+            uint32_t my_max = min_val;
+            for (int64_t i = 0; i < local_slice_end() - local_slice_start(); i++) {
+                if (raw_slice()[i] > my_max) {
+                    my_max = raw_slice()[i];
+                }
+            }
+
+            *symm_reduce_src = my_max;
+            setup_psync();
+            shmem_int_max_to_all((int*)symm_reduce_dest, (int*)symm_reduce_src, 1, 0, 0,
+                    shmem_n_pes(), (int*)pwork, psync);
+            shmem_barrier_all();
+            return *symm_reduce_dest;
         }
 
         uint32_t sum(uint32_t zero_val) override {
-            throw std::runtime_error("uint32_t unsupported");
+            uint32_t my_sum = zero_val;
+            for (int64_t i = 0; i < local_slice_end() - local_slice_start(); i++) {
+                my_sum += raw_slice()[i];
+            }
+
+            *symm_reduce_src = my_sum;
+            setup_psync();
+            shmem_int_sum_to_all((int*)symm_reduce_dest, (int*)symm_reduce_src, 1, 0, 0,
+                    shmem_n_pes(), (int*)pwork, psync);
+            shmem_barrier_all();
+            return *symm_reduce_dest;
         }
 
     private:
@@ -817,15 +846,37 @@ class ShmemML1D<double> : public ShmemML1D_Base<double> {
         }
 
         void atomic_add(int64_t global_index, double val) override {
-            throw std::runtime_error("double unsupported");
+            atomic_fetch_add(global_index, val);
         }
 
         double atomic_fetch_add(int64_t global_index, double val) override {
-            throw std::runtime_error("double unsupported");
+            double old_val = 0.0;
+            double expected, new_val;
+
+            do {
+                expected = old_val;
+                new_val = expected + val;
+                old_val = atomic_cas(global_index, expected, new_val);
+            } while (old_val != expected);
+            return old_val;
         }
 
         double atomic_cas(int64_t global_index, double expected, double update_to) override {
-            throw std::runtime_error("double unsupported");
+            int pe = global_index / _chunk_size;
+            int64_t offset = global_index % _chunk_size;
+            double *ptr = raw_slice() + offset;
+
+            union {
+                int64_t i;
+                double d;
+            } _expected, _new_val, _old_val;
+
+            _expected.d = expected;
+            _new_val.d = update_to;
+            _old_val.i = shmem_int64_atomic_compare_swap((int64_t*)ptr,
+                    _expected.i, _new_val.i, pe);
+
+            return _old_val.d;
         }
 
         void atomic_or(int64_t global_index, double mask) override {
@@ -833,11 +884,33 @@ class ShmemML1D<double> : public ShmemML1D_Base<double> {
         }
 
         double max(double min_val) override {
-            throw std::runtime_error("double unsupported");
+            double my_max = min_val;
+            for (int64_t i = 0; i < local_slice_end() - local_slice_start(); i++) {
+                if (raw_slice()[i] > my_max) {
+                    my_max = raw_slice()[i];
+                }
+            }
+
+            *symm_reduce_src = my_max;
+            setup_psync();
+            shmem_double_max_to_all(symm_reduce_dest, symm_reduce_src, 1, 0, 0,
+                    shmem_n_pes(), pwork, psync);
+            shmem_barrier_all();
+            return *symm_reduce_dest;
         }
 
         double sum(double zero_val) override {
-            throw std::runtime_error("double unsupported");
+            double my_sum = zero_val;
+            for (int64_t i = 0; i < local_slice_end() - local_slice_start(); i++) {
+                my_sum += raw_slice()[i];
+            }
+
+            *symm_reduce_src = my_sum;
+            setup_psync();
+            shmem_double_sum_to_all(symm_reduce_dest, symm_reduce_src, 1, 0, 0,
+                    shmem_n_pes(), pwork, psync);
+            shmem_barrier_all();
+            return *symm_reduce_dest;
         }
 
     private:

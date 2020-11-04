@@ -12,6 +12,11 @@ extern "C" {
 #define CRC32
 #include "crc.c"
 
+void mailbox_destroy(mailbox_t *mailbox) {
+    shmem_free(mailbox->indices);
+    shmem_free(mailbox->buf);
+}
+
 void mailbox_init(mailbox_t *mailbox, size_t capacity_in_bytes) {
     memset(mailbox, 0x00, sizeof(*mailbox));
     mailbox->indices = (uint64_t *)shmem_malloc(
