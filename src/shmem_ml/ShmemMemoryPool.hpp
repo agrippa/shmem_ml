@@ -10,6 +10,8 @@ extern "C" {
 }
 #endif
 
+// #define TRACE_MEM
+
 #include <assert.h>
 #include <arrow/memory_pool.h>
 
@@ -30,23 +32,31 @@ class ShmemMemoryPool : public arrow::MemoryPool {
         }
 
         arrow::Status Allocate(int64_t size, uint8_t** out) override {
+            arrow::Status status = arrow::Status::OK();
             if (size == 0) {
                 *out = NULL;
-                return arrow::Status::OK();
-            }
-
-            void *ptr = shmemml_mspace_malloc(_allocator, size);
-            if (ptr) {
-                _bytes_allocated += size;
-                *out = (uint8_t*)ptr;
-                return arrow::Status::OK();
             } else {
-                *out = NULL;
-                return arrow::Status::OutOfMemory("ShmemMemoryPool::Allocate");
+                void *ptr = shmemml_mspace_malloc(_allocator, size);
+                if (ptr) {
+                    _bytes_allocated += size;
+                    *out = (uint8_t*)ptr;
+                } else {
+                    *out = NULL;
+                    status = arrow::Status::OutOfMemory("ShmemMemoryPool::Allocate");
+                }
             }
+#ifdef TRACE_MEM
+            fprintf(stderr, "PE %d Allocate size=%ld out=%p\n", shmem_my_pe(),
+                    size, *out);
+#endif
+            return status;
         }
 
         arrow::Status Reallocate(int64_t old_size, int64_t new_size, uint8_t** ptr) override {
+#ifdef TRACE_MEM
+            fprintf(stderr, "PE %d Reallocate old_size=%ld new_size=%ld "
+                    "*ptr=%p\n", shmem_my_pe(), old_size, new_size, *ptr);
+#endif
             if (*ptr == NULL) {
                 assert(old_size == 0);
                 return Allocate(new_size, ptr);
@@ -69,10 +79,22 @@ class ShmemMemoryPool : public arrow::MemoryPool {
         }
 
         void Free(uint8_t* buffer, int64_t size) override {
+#ifdef TRACE_MEM
+            fprintf(stderr, "PE %d Free buffer=%p size=%ld\n", shmem_my_pe(),
+                    buffer, size);
+#endif
             if (buffer == NULL) {
                 assert(size == 0);
             } else {
                 _bytes_allocated -= size;
+                /*
+                 * Note that a common issue is a crash here when SHMEM-ML tries
+                 * to free a stack-allocated object in main() after the
+                 * programmer has called shmem_finalize. The simplest workaround
+                 * is to add a local scope in main() that closes before
+                 * shmem_finalize to ensure all symmetric objects are cleaned
+                 * up.
+                 */
                 shmemml_mspace_free(_allocator, buffer);
             }
         }

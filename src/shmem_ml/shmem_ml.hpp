@@ -168,6 +168,9 @@ class ShmemML1D_Base {
         }
 
         ~ShmemML1D_Base() {
+            // Collective destruction
+            shmem_barrier_all();
+
             mailbox_destroy(&atomics_mailbox);
             shmem_free(symm_reduce_dest);
             shmem_free(symm_reduce_src);
@@ -542,8 +545,6 @@ class ShmemML1D : public ShmemML1D_Base<T> {
         std::shared_ptr<arrow::FixedSizeBinaryArray> _arr;
 };
 
-
-// TODO int, unsigned, double
 template<>
 class ShmemML1D<long long> : public ShmemML1D_Base<long long> {
     public:
@@ -962,6 +963,11 @@ class ShmemML2D {
             _arrs->Validate();
         }
 
+        ~ShmemML2D() {
+            // Collective destruction
+            shmem_barrier_all();
+        }
+
         int64_t N() { return _N; }
         int64_t M() { return _M; }
         int64_t rows_per_pe() { return _rows_per_pe; }
@@ -969,18 +975,29 @@ class ShmemML2D {
             shmem_barrier_all();
         }
 
+        void clear(double v) {
+            for (int c = 0; c < _arrs->num_columns(); c++) {
+                double *symm = get_column_array(c);
+
+                if (v == 0.0) {
+                    memset(symm, 0x00, _rows_per_pe * sizeof(*symm));
+                } else {
+                    for (int i = 0; i < _rows_per_pe; i++) {
+                        symm[i] = v;
+                    }
+                }
+            }
+        }
+
+        void set(int64_t row, int64_t col, double v) {
+            double* symm = get_column_array(col);
+            int pe = row / _rows_per_pe;
+            int64_t offset = row % _rows_per_pe;
+            shmem_putmem(symm + offset, &v, sizeof(v), pe);
+        }
+
         double get(int64_t row, int64_t col) {
-            assert(col < _arrs->num_columns());
-            std::shared_ptr<arrow::ChunkedArray> col_chunked = _arrs->column(col);
-            std::shared_ptr<arrow::Array> col_arr = col_chunked->chunk(0);
-            assert(col_chunked->length() == col_arr->length()); // Single-chunk array
-
-            std::shared_ptr<arrow::PrimitiveArray> src_arr =
-                std::dynamic_pointer_cast<arrow::PrimitiveArray, arrow::Array>(col_arr);
-            assert(src_arr);
-
-            double* symm = (double*)src_arr->values()->data();
-
+            double* symm = get_column_array(col);
             int pe = row / _rows_per_pe;
             int64_t offset = row % _rows_per_pe;
 
@@ -1022,27 +1039,29 @@ class ShmemML2D {
 
 
     private:
+
+        inline double* get_column_array(int64_t col) {
+            assert(col < _arrs->num_columns());
+            std::shared_ptr<arrow::ChunkedArray> col_chunked = _arrs->column(
+                    col);
+            std::shared_ptr<arrow::Array> col_arr = col_chunked->chunk(0);
+            assert(col_chunked->length() == col_arr->length());
+
+            std::shared_ptr<arrow::PrimitiveArray> src_arr =
+                std::dynamic_pointer_cast<arrow::PrimitiveArray, arrow::Array>(
+                        col_arr);
+            assert(src_arr);
+
+            double* symm = (double*)src_arr->values()->data();
+            return symm;
+        }
+
         std::shared_ptr<arrow::Table> _arrs;
         int64_t _M, _N;
         int64_t _rows_per_pe;
         ShmemMemoryPool* pool;
         atomics_msg_2d_result_handler<double> atomics_cb;
 };
-
-#if 0
-template<>
-void ShmemML1D<int64_t>::atomic_add(int64_t global_index, int64_t val);
-
-template<>
-int64_t ShmemML1D<int64_t>::atomic_fetch_add(int64_t global_index, int64_t val);
-
-template<>
-int64_t ShmemML1D<int64_t>::atomic_cas(int64_t global_index, int64_t expected,
-        int64_t update_to);
-
-template<>
-void ShmemML1D<int64_t>::atomic_or(int64_t global_index, int64_t mask);
-#endif
 
 template <typename T>
 class ReplicatedShmemML1D : public ShmemML1D<T> {

@@ -1,12 +1,12 @@
 CC=oshcc
 CXX=oshcxx
-FLAGS=-g -O3 -Isrc/shmem_ml -Wall -Wextra -std=c++11 -Isrc/shmem_ml/dlmalloc -Isrc/shmem_ml/crc \
+FLAGS=-g -O0 -Isrc/shmem_ml -Wall -Wextra -std=c++11 -Isrc/shmem_ml/dlmalloc -Isrc/shmem_ml/crc \
 	  -I$(ARROW_HOME)/include $(shell python3-config --includes) \
 	  -DMSPACES=1 -DONLY_MSPACES=1 -DHAVE_MORECORE=0 -DUSE_LOCKS=0 -DFOOTERS=1 -I$(OPENSHMEM_HOME)/include \
 	  -I$(shell python -c 'import numpy; print(numpy.get_include())')
 LINK_FLAGS=-lshmem_ml -larrow -larrow_python -lshmem -Lbin -L$(ARROW_HOME)/lib -L$(SHMEM_HOME)/lib -lstdc++ -lzstd -lbz2 -lutf8proc -lbrotlienc -lbrotlidec -lbrotlicommon -llz4 $(shell python3-config --ldflags)
 
-tests: bin/save_load_get_set bin/shmem_ml_1d bin/shmem_replicated_1d
+tests: bin/save_load_get_set bin/shmem_ml_1d bin/shmem_replicated_1d bin/shmem_ml_2d
 
 libs: bin/libshmem_ml.a src/shmem_ml/core.so
 
@@ -54,6 +54,9 @@ bin/shmem_ml_1d: test/shmem_ml_1d.cpp bin/libshmem_ml.a
 
 bin/shmem_replicated_1d: test/shmem_replicated_1d.cpp bin/libshmem_ml.a
 	$(CXX) $(FLAGS) -o $@ test/shmem_replicated_1d.cpp $(LINK_FLAGS)
+
+bin/shmem_ml_2d: test/shmem_ml_2d.cpp bin/libshmem_ml.a
+	$(CXX) $(FLAGS) -o $@ test/shmem_ml_2d.cpp $(LINK_FLAGS)
 
 clean:
 	rm -f bin/* PyShmemML.cpython-37m-x86_64-linux-gnu.so src/shmem_ml/core.so src/shmem_ml/PyShmemML.cpp
