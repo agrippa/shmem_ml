@@ -8,17 +8,22 @@ LINK_FLAGS=-lshmem_ml -larrow -larrow_python -lshmem -Lbin -L$(ARROW_HOME)/lib -
 
 tests: bin/save_load_get_set bin/shmem_ml_1d bin/shmem_replicated_1d bin/shmem_ml_2d
 
-libs: bin/libshmem_ml.a src/shmem_ml/core.so
+libs: bin/libshmem_ml.so src/shmem_ml/core.so
 
 python: libs
 	python setup.py build_ext --inplace --force
 
-bin/libshmem_ml.a: bin/dlmalloc.o bin/shmem_ml.o bin/ShmemMemoryPool.o bin/mailbox.o bin/mailbox_buffer.o
-	ar rcs $@ $^
+bin/libshmem_ml.so: bin/dlmalloc.o bin/shmem_ml.o bin/ShmemMemoryPool.o bin/mailbox.o bin/mailbox_buffer.o
+	$(CC) -shared $^ -o $@ 
 
 src/shmem_ml/core.so: bin/dlmalloc.o bin/shmem_ml.o bin/ShmemMemoryPool.o bin/mailbox.o bin/mailbox_buffer.o
 	$(CC) $(FLAGS) -shared $^ -o $@ -larrow -larrow_python -Lbin -L$(ARROW_HOME)/lib $(shell python3-config --ldflags) -L$(OPENSHMEM_HOME)/lib64
 
+bin/shmem_ml_client_server.o: src/shmem_ml/shmem_ml_client_server.cpp
+	$(CXX) $(FLAGS) -fPIC -c -o $@ $^
+
+bin/shmem_ml_client_server: bin/shmem_ml_client_server.o python
+	$(CC) $(FLAGS) bin/shmem_ml_client_server.o -o $@ $(LINK_FLAGS)
 
 bin/dlmalloc.o: src/shmem_ml/dlmalloc/dlmalloc.c
 	$(CXX) $(FLAGS) -fPIC -c -o $@ $^
@@ -38,7 +43,7 @@ bin/mailbox_buffer.o: src/shmem_ml/mailbox_buffer.cpp
 bin/bfs: example/bfs.cpp \
 		 example/graph500-graph500-3.0.0/generator/splittable_mrg.c \
 		 example/graph500-graph500-3.0.0/generator/graph_generator.c \
-		 bin/libshmem_ml.a
+		 bin/libshmem_ml.so
 	$(CC) $(FLAGS) -Iexample/graph500-graph500-3.0.0 -c -fPIC example/graph500-graph500-3.0.0/generator/splittable_mrg.c -o bin/splittable_mrg.o
 	$(CC) $(FLAGS) -Iexample/graph500-graph500-3.0.0 -c -fPIC example/graph500-graph500-3.0.0/generator/graph_generator.c -o bin/graph_generator.o
 	$(CC) $(FLAGS) -Iexample/graph500-graph500-3.0.0 -c -fPIC example/graph500-graph500-3.0.0/generator/utils.c -o bin/utils.o
@@ -46,16 +51,16 @@ bin/bfs: example/bfs.cpp \
 	$(CXX) $(FLAGS) -Iexample/graph500-graph500-3.0.0 -c -fPIC example/bfs.cpp -o bin/bfs.o
 	$(CXX) $(FLAGS) bin/splittable_mrg.o bin/graph_generator.o bin/utils.o bin/make_graph.o bin/bfs.o $(LINK_FLAGS) -o $@
 
-bin/save_load_get_set: test/save_load_get_set.cpp bin/libshmem_ml.a
+bin/save_load_get_set: test/save_load_get_set.cpp bin/libshmem_ml.so
 	$(CXX) $(FLAGS) -o $@ test/save_load_get_set.cpp $(LINK_FLAGS)
 
-bin/shmem_ml_1d: test/shmem_ml_1d.cpp bin/libshmem_ml.a
+bin/shmem_ml_1d: test/shmem_ml_1d.cpp bin/libshmem_ml.so
 	$(CXX) $(FLAGS) -o $@ test/shmem_ml_1d.cpp $(LINK_FLAGS)
 
-bin/shmem_replicated_1d: test/shmem_replicated_1d.cpp bin/libshmem_ml.a
+bin/shmem_replicated_1d: test/shmem_replicated_1d.cpp bin/libshmem_ml.so
 	$(CXX) $(FLAGS) -o $@ test/shmem_replicated_1d.cpp $(LINK_FLAGS)
 
-bin/shmem_ml_2d: test/shmem_ml_2d.cpp bin/libshmem_ml.a
+bin/shmem_ml_2d: test/shmem_ml_2d.cpp bin/libshmem_ml.so
 	$(CXX) $(FLAGS) -o $@ test/shmem_ml_2d.cpp $(LINK_FLAGS)
 
 clean:

@@ -6,7 +6,7 @@ from PyShmemML import shmem_ml_init, shmem_ml_finalize, PyShmemML1DD, PyShmemML2
 import sklearn.linear_model
 
 # Set up runtime
-# shmem_ml_init()
+shmem_ml_init()
 
 # Distributed, collective allocation of a 10-element array of float64
 nsamples = 500000
@@ -91,6 +91,4 @@ if pe() == 0:
 
 pred.sync();
 
-
-# Shut down runtime
-#shmem_ml_finalize()
+# shmem_ml_finalize()

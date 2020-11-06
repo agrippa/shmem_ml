@@ -6,9 +6,6 @@ from pyarrow.includes.libarrow cimport CArray, CRecordBatch, CTable
 
 np.import_array()
 
-# cdef extern from "shmem_ml.cpp":
-#     pass
-
 cdef extern from "stdint.h":
     ctypedef signed int int64_t
 

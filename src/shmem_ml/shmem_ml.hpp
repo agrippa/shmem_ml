@@ -15,6 +15,7 @@
 #include <set>
 #include <sstream>
 
+#define UNUSED_VAR(x) (void)(x)
 #define BITS_PER_BYTE 8
 
 #define ATOMICS_AS_MSGS
@@ -23,6 +24,105 @@
 
 #ifdef ATOMICS_AS_MSGS
 #define MAX_BUFFERED_ATOMICS 4096
+
+void *aborting_thread(void *user_data);
+
+extern volatile int this_pe_has_exited;
+extern int id_counter;
+extern mailbox_t cmd_mailbox;
+extern mailbox_msg_header_t *cmd_msg;
+extern shmem_ctx_t cmd_ctx;
+extern void command_loop();
+
+typedef enum {
+    CREATE_1D_DOUBLE,
+    DESTROY_1D_DOUBLE,
+    CREATE_1D_LONGLONG,
+    DESTROY_1D_LONGLONG,
+    CREATE_1D_INT64,
+    DESTROY_1D_INT64,
+    CREATE_1D_UINT32,
+    DESTROY_1D_UINT32,
+    CMD_DONE,
+    CMD_INVALID
+} shmem_ml_command;
+
+struct shmem_ml_cmd {
+    shmem_ml_command cmd;
+    union {
+        struct {
+            int64_t N;
+        } create_1d;
+        struct {
+            unsigned id;
+        } destroy_1d;
+    } payload;
+};
+
+struct shmem_ml_create_1d_double : public shmem_ml_cmd {
+    shmem_ml_create_1d_double(int64_t N) {
+        cmd = CREATE_1D_DOUBLE;
+        payload.create_1d.N = N;
+    }
+};
+
+struct shmem_ml_destroy_1d_double : public shmem_ml_cmd {
+    shmem_ml_destroy_1d_double(unsigned id) {
+        cmd = DESTROY_1D_DOUBLE;
+        payload.destroy_1d.id = id;
+    }
+};
+
+struct shmem_ml_create_1d_longlong : public shmem_ml_cmd {
+    shmem_ml_create_1d_longlong(int64_t N) {
+        cmd = CREATE_1D_LONGLONG;
+        payload.create_1d.N = N;
+    }
+};
+
+struct shmem_ml_destroy_1d_longlong : public shmem_ml_cmd {
+    shmem_ml_destroy_1d_longlong(unsigned id) {
+        cmd = DESTROY_1D_LONGLONG;
+        payload.destroy_1d.id = id;
+    }
+};
+
+struct shmem_ml_create_1d_int64 : public shmem_ml_cmd {
+    shmem_ml_create_1d_int64(int64_t N) {
+        cmd = CREATE_1D_INT64;
+        payload.create_1d.N = N;
+    }
+};
+
+struct shmem_ml_destroy_1d_int64 : public shmem_ml_cmd {
+    shmem_ml_destroy_1d_int64(unsigned id) {
+        cmd = DESTROY_1D_INT64;
+        payload.destroy_1d.id = id;
+    }
+};
+
+struct shmem_ml_create_1d_uint32 : public shmem_ml_cmd {
+    shmem_ml_create_1d_uint32(int64_t N) {
+        cmd = CREATE_1D_UINT32;
+        payload.create_1d.N = N;
+    }
+};
+
+struct shmem_ml_destroy_1d_uint32 : public shmem_ml_cmd {
+    shmem_ml_destroy_1d_uint32(unsigned id) {
+        cmd = DESTROY_1D_UINT32;
+        payload.destroy_1d.id = id;
+    }
+};
+
+struct shmem_ml_cmd_done : public shmem_ml_cmd {
+    shmem_ml_cmd_done() {
+        cmd = CMD_DONE;
+    }
+};
+
+void send_cmd(shmem_ml_cmd* cmd);
+bool setup_client_server();
 
 template <typename T>
 class ShmemML1D;
@@ -107,18 +207,23 @@ class ShmemML1DIndex {
 template <typename T>
 class ShmemML1D_Base {
     public:
-        ShmemML1D_Base(int64_t N, unsigned max_shmem_reduction_n = 1
+        ShmemML1D_Base(int64_t N, shmem_ml_cmd&& create_cmd,
+                shmem_ml_cmd&& _destroy_cmd,
+                unsigned max_shmem_reduction_n = 1
 #ifdef ATOMICS_AS_MSGS
                 , atomics_msg_1d_result_handler<T> _atomics_cb = NULL
 #endif
                 ) {
             assert(sizeof(int64_t) == sizeof(double));
+            id = id_counter++;
             _N = N;
             int npes = shmem_n_pes();
             _chunk_size = (_N + npes - 1) / npes;
             _local_slice_start = calculate_local_slice_start(shmem_my_pe());
             _local_slice_end = calculate_local_slice_end(shmem_my_pe());
+            destroy_cmd = _destroy_cmd;
 
+            send_cmd(&create_cmd);
             shmem_barrier_all();
 
             pool = ShmemMemoryPool::get();
@@ -150,10 +255,10 @@ class ShmemML1D_Base {
             assert(buffered_atomics);
             n_done_pes = 0;
             atomics_cb = _atomics_cb;
-#endif
 
             // Ensure all PEs have completed construction
             shmem_barrier_all();
+#endif
         }
 
         void clear(T init_val) {
@@ -168,6 +273,8 @@ class ShmemML1D_Base {
         }
 
         ~ShmemML1D_Base() {
+            send_cmd(&destroy_cmd);
+
             // Collective destruction
             shmem_barrier_all();
 
@@ -401,6 +508,8 @@ class ShmemML1D_Base {
             }
         }
 
+        unsigned get_id() { return id; }
+
         virtual inline T* raw_slice() = 0;
         virtual std::shared_ptr<arrow::Array> get_arrow_array() = 0;
 
@@ -465,6 +574,7 @@ class ShmemML1D_Base {
             return local_slice_end;
         }
 
+        unsigned id;
         int64_t _N;
         int64_t _chunk_size;
         int64_t _local_slice_start;
@@ -472,6 +582,7 @@ class ShmemML1D_Base {
         ShmemMemoryPool* pool;
         T* symm_reduce_dest;
         T* symm_reduce_src;
+        shmem_ml_cmd destroy_cmd;
 
 #ifdef ATOMICS_AS_MSGS
         mailbox_t atomics_mailbox;
@@ -553,7 +664,10 @@ class ShmemML1D<long long> : public ShmemML1D_Base<long long> {
 #ifdef ATOMICS_AS_MSGS
                 , atomics_msg_1d_result_handler<long long> _atomics_cb = NULL
 #endif
-                ) : ShmemML1D_Base(N, max_shmem_reduction_n
+                ) : ShmemML1D_Base(N,
+                    shmem_ml_create_1d_longlong(N),
+                    shmem_ml_destroy_1d_longlong(id_counter),
+                    max_shmem_reduction_n
 #ifdef ATOMICS_AS_MSGS
                     , _atomics_cb
 #endif
@@ -640,7 +754,10 @@ class ShmemML1D<int64_t> : public ShmemML1D_Base<int64_t> {
 #ifdef ATOMICS_AS_MSGS
                 , atomics_msg_1d_result_handler<int64_t> _atomics_cb = NULL
 #endif
-                ) : ShmemML1D_Base(N, max_shmem_reduction_n
+                ) : ShmemML1D_Base(N,
+                    shmem_ml_create_1d_int64(N),
+                    shmem_ml_destroy_1d_int64(id_counter),
+                    max_shmem_reduction_n
 #ifdef ATOMICS_AS_MSGS
                     , _atomics_cb
 #endif
@@ -732,7 +849,10 @@ class ShmemML1D<uint32_t> : public ShmemML1D_Base<uint32_t> {
 #ifdef ATOMICS_AS_MSGS
                 , atomics_msg_1d_result_handler<uint32_t> _atomics_cb = NULL
 #endif
-                ) : ShmemML1D_Base(N, max_shmem_reduction_n
+                ) : ShmemML1D_Base(N,
+                    shmem_ml_create_1d_uint32(N),
+                    shmem_ml_destroy_1d_uint32(id_counter),
+                    max_shmem_reduction_n
 #ifdef ATOMICS_AS_MSGS
                     , _atomics_cb
 #endif
@@ -822,7 +942,10 @@ class ShmemML1D<double> : public ShmemML1D_Base<double> {
 #ifdef ATOMICS_AS_MSGS
                 , atomics_msg_1d_result_handler<double> _atomics_cb = NULL
 #endif
-                ) : ShmemML1D_Base(N, max_shmem_reduction_n
+                ) : ShmemML1D_Base(N,
+                    shmem_ml_create_1d_double(N),
+                    shmem_ml_destroy_1d_double(id_counter),
+                    max_shmem_reduction_n
 #ifdef ATOMICS_AS_MSGS
                     , _atomics_cb
 #endif
@@ -1195,5 +1318,34 @@ void shmem_ml_init();
 void shmem_ml_finalize();
 
 unsigned long long shmem_ml_current_time_us();
+
+
+template <typename lambda>
+static inline void shmem_ml_client_server_launch(lambda l) {
+    if (getenv("SHMEM_ML_HANG_ABORT")) {
+        pthread_t aborting_pthread;
+        const int pthread_err = pthread_create(&aborting_pthread, NULL,
+                aborting_thread, NULL);
+        assert(pthread_err == 0);
+    }
+
+    bool is_server = setup_client_server();
+
+    mailbox_init(&cmd_mailbox, 32 * 1024 * 1024);
+    cmd_msg = mailbox_allocate_msg(sizeof(shmem_ml_cmd), &cmd_ctx);
+
+    if (is_server) {
+        command_loop();
+    } else {
+        l();
+
+        shmem_ml_cmd_done done_cmd;
+        send_cmd(&done_cmd);
+    }
+
+    mailbox_destroy(&cmd_mailbox);
+    this_pe_has_exited = 1;
+}
+
 
 #endif
