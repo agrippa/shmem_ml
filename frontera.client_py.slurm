@@ -41,4 +41,5 @@ export SLURM_ARGS="--ntasks=$(($SLURM_NNODES * $CORES_PER_NODE)) --ntasks-per-so
 
 echo
 
-oshrun -N 56 $HOME/shmem_ml/bin/shmem_ml_client_server $HOME/shmem_ml/example/python_client.py
+# oshrun -N 56 $HOME/shmem_ml/bin/shmem_ml_client_server $HOME/shmem_ml/example/python_client.py
+oshrun -N 2 $HOME/shmem_ml/bin/shmem_ml_client_server $HOME/shmem_ml/example/python_client.py

@@ -188,7 +188,7 @@ int mailbox_send(mailbox_msg_header_t *msg, shmem_ctx_t ctx, size_t msg_len,
     return 1;
 }
 
-int mailbox_recv(void *msg, size_t msg_capacity, size_t *msg_len,
+int mailbox_recv(void *msg, size_t msg_capacity,
         mailbox_t *mailbox) {
     uint32_t read_index, write_index;
     uint64_t curr_indices;
@@ -234,7 +234,10 @@ int mailbox_recv(void *msg, size_t msg_capacity, size_t *msg_len,
         return 0;
     }
 
-    *msg_len = header.msg_len;
+    if (msg_capacity < header.msg_len) {
+        return header.msg_len;
+    }
+
     assert(msg_capacity >= header.msg_len);
     get_from_mailbox_with_rotation(msg_offset, msg, header.msg_len, mailbox);
 
@@ -268,5 +271,5 @@ int mailbox_recv(void *msg, size_t msg_capacity, size_t *msg_len,
     }
     mailbox->indices_curr_val = new_indices;
 
-    return 1;
+    return header.msg_len;
 }

@@ -2,6 +2,7 @@ import numpy as np
 # from numpy cimport int64_t
 import pyarrow
 from libcpp.memory cimport shared_ptr
+from libcpp cimport bool
 from pyarrow.includes.libarrow cimport CArray, CRecordBatch, CTable
 
 np.import_array()

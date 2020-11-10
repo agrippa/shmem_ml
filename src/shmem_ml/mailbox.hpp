@@ -44,8 +44,7 @@ int mailbox_send(mailbox_msg_header_t *msg, shmem_ctx_t ctx, size_t msg_len,
  * stored in msg, msg_len is updated to reflect the length of the message, and 1
  * is returned. Otherwise, 0 is returned to indicate no message was found.
  */
-int mailbox_recv(void *msg, size_t msg_capacity, size_t *msg_len,
-        mailbox_t *mailbox);
+int mailbox_recv(void *msg, size_t msg_capacity, mailbox_t *mailbox);
 
 void mailbox_destroy(mailbox_t *mailbox);
 

@@ -31,7 +31,6 @@ def shmem_ml_init():
 
     # atexit.register(shmem_ml_finalize)
 
-
 cdef class PyShmemML1DD:
     cdef ShmemML1D[double]* c_vec
 

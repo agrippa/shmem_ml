@@ -8,7 +8,7 @@ LINK_FLAGS=-lshmem_ml -larrow -larrow_python -lshmem -Lbin -L$(ARROW_HOME)/lib -
 
 tests: bin/save_load_get_set bin/shmem_ml_1d bin/shmem_replicated_1d bin/shmem_ml_2d
 
-libs: bin/libshmem_ml.so src/shmem_ml/core.so
+libs: bin/libshmem_ml.so
 
 python: libs
 	python setup.py build_ext --inplace --force
@@ -16,8 +16,8 @@ python: libs
 bin/libshmem_ml.so: bin/dlmalloc.o bin/shmem_ml.o bin/ShmemMemoryPool.o bin/mailbox.o bin/mailbox_buffer.o
 	$(CC) -shared $^ -o $@ 
 
-src/shmem_ml/core.so: bin/dlmalloc.o bin/shmem_ml.o bin/ShmemMemoryPool.o bin/mailbox.o bin/mailbox_buffer.o
-	$(CC) $(FLAGS) -shared $^ -o $@ -larrow -larrow_python -Lbin -L$(ARROW_HOME)/lib $(shell python3-config --ldflags) -L$(OPENSHMEM_HOME)/lib64
+bin/libshmem_ml.a: bin/dlmalloc.o bin/shmem_ml.o bin/ShmemMemoryPool.o bin/mailbox.o bin/mailbox_buffer.o
+	ar rcs $@ $^
 
 bin/shmem_ml_client_server.o: src/shmem_ml/shmem_ml_client_server.cpp
 	$(CXX) $(FLAGS) -fPIC -c -o $@ $^
@@ -64,4 +64,4 @@ bin/shmem_ml_2d: test/shmem_ml_2d.cpp bin/libshmem_ml.so
 	$(CXX) $(FLAGS) -o $@ test/shmem_ml_2d.cpp $(LINK_FLAGS)
 
 clean:
-	rm -f bin/* PyShmemML.cpython-37m-x86_64-linux-gnu.so src/shmem_ml/core.so src/shmem_ml/PyShmemML.cpp
+	rm -f bin/* PyShmemML.cpython-37m-x86_64-linux-gnu.so src/shmem_ml/PyShmemML.cpp

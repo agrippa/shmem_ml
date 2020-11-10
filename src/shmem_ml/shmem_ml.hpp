@@ -2,9 +2,11 @@
 #define _SHMEM_ML_HPP
 
 #include <shmem_ml_utils.hpp>
+#include <shmem_ml_cmd.hpp>
 #include <mailbox.hpp>
 #include <mailbox_buffer.hpp>
 #include <ShmemMemoryPool.hpp>
+
 #include <arrow/array.h>
 #include <arrow/record_batch.h>
 #include <arrow/table.h>
@@ -12,8 +14,10 @@
 #include <arrow/array/builder_primitive.h>
 #include <arrow/io/file.h>
 #include <arrow/python/pyarrow.h>
+
 #include <set>
 #include <sstream>
+#include <dlfcn.h>
 
 #define UNUSED_VAR(x) (void)(x)
 #define BITS_PER_BYTE 8
@@ -30,98 +34,8 @@ void *aborting_thread(void *user_data);
 extern volatile int this_pe_has_exited;
 extern int id_counter;
 extern mailbox_t cmd_mailbox;
-extern mailbox_msg_header_t *cmd_msg;
 extern shmem_ctx_t cmd_ctx;
-extern void command_loop();
 
-typedef enum {
-    CREATE_1D_DOUBLE,
-    DESTROY_1D_DOUBLE,
-    CREATE_1D_LONGLONG,
-    DESTROY_1D_LONGLONG,
-    CREATE_1D_INT64,
-    DESTROY_1D_INT64,
-    CREATE_1D_UINT32,
-    DESTROY_1D_UINT32,
-    CMD_DONE,
-    CMD_INVALID
-} shmem_ml_command;
-
-struct shmem_ml_cmd {
-    shmem_ml_command cmd;
-    union {
-        struct {
-            int64_t N;
-        } create_1d;
-        struct {
-            unsigned id;
-        } destroy_1d;
-    } payload;
-};
-
-struct shmem_ml_create_1d_double : public shmem_ml_cmd {
-    shmem_ml_create_1d_double(int64_t N) {
-        cmd = CREATE_1D_DOUBLE;
-        payload.create_1d.N = N;
-    }
-};
-
-struct shmem_ml_destroy_1d_double : public shmem_ml_cmd {
-    shmem_ml_destroy_1d_double(unsigned id) {
-        cmd = DESTROY_1D_DOUBLE;
-        payload.destroy_1d.id = id;
-    }
-};
-
-struct shmem_ml_create_1d_longlong : public shmem_ml_cmd {
-    shmem_ml_create_1d_longlong(int64_t N) {
-        cmd = CREATE_1D_LONGLONG;
-        payload.create_1d.N = N;
-    }
-};
-
-struct shmem_ml_destroy_1d_longlong : public shmem_ml_cmd {
-    shmem_ml_destroy_1d_longlong(unsigned id) {
-        cmd = DESTROY_1D_LONGLONG;
-        payload.destroy_1d.id = id;
-    }
-};
-
-struct shmem_ml_create_1d_int64 : public shmem_ml_cmd {
-    shmem_ml_create_1d_int64(int64_t N) {
-        cmd = CREATE_1D_INT64;
-        payload.create_1d.N = N;
-    }
-};
-
-struct shmem_ml_destroy_1d_int64 : public shmem_ml_cmd {
-    shmem_ml_destroy_1d_int64(unsigned id) {
-        cmd = DESTROY_1D_INT64;
-        payload.destroy_1d.id = id;
-    }
-};
-
-struct shmem_ml_create_1d_uint32 : public shmem_ml_cmd {
-    shmem_ml_create_1d_uint32(int64_t N) {
-        cmd = CREATE_1D_UINT32;
-        payload.create_1d.N = N;
-    }
-};
-
-struct shmem_ml_destroy_1d_uint32 : public shmem_ml_cmd {
-    shmem_ml_destroy_1d_uint32(unsigned id) {
-        cmd = DESTROY_1D_UINT32;
-        payload.destroy_1d.id = id;
-    }
-};
-
-struct shmem_ml_cmd_done : public shmem_ml_cmd {
-    shmem_ml_cmd_done() {
-        cmd = CMD_DONE;
-    }
-};
-
-void send_cmd(shmem_ml_cmd* cmd);
 bool setup_client_server();
 
 template <typename T>
@@ -207,13 +121,13 @@ class ShmemML1DIndex {
 template <typename T>
 class ShmemML1D_Base {
     public:
-        ShmemML1D_Base(int64_t N, shmem_ml_cmd&& create_cmd,
-                shmem_ml_cmd&& _destroy_cmd,
+        ShmemML1D_Base(int64_t N, shmem_ml_cmd<T>&& create_cmd,
+                shmem_ml_cmd<T>&& _destroy_cmd,
                 unsigned max_shmem_reduction_n = 1
 #ifdef ATOMICS_AS_MSGS
                 , atomics_msg_1d_result_handler<T> _atomics_cb = NULL
 #endif
-                ) {
+                ) : destroy_cmd(_destroy_cmd) {
             assert(sizeof(int64_t) == sizeof(double));
             id = id_counter++;
             _N = N;
@@ -221,7 +135,6 @@ class ShmemML1D_Base {
             _chunk_size = (_N + npes - 1) / npes;
             _local_slice_start = calculate_local_slice_start(shmem_my_pe());
             _local_slice_end = calculate_local_slice_end(shmem_my_pe());
-            destroy_cmd = _destroy_cmd;
 
             send_cmd(&create_cmd);
             shmem_barrier_all();
@@ -262,6 +175,9 @@ class ShmemML1D_Base {
         }
 
         void clear(T init_val) {
+            shmem_ml_clear_1d<T> cmd(id, init_val);
+            send_cmd(&cmd);
+
             T* local_slice = this->raw_slice();
 
             int64_t local_slice_len = local_slice_end() - local_slice_start();
@@ -529,12 +445,13 @@ class ShmemML1D_Base {
             int success;
             do {
                 T old_val, new_val;
-                size_t msg_len;
-                success = mailbox_recv(buffered_atomics,
+                int msg_len = mailbox_recv(buffered_atomics,
                         MAX_BUFFERED_ATOMICS * sizeof(*buffered_atomics),
-                        &msg_len, &atomics_mailbox);
-                if (success) {
+                        &atomics_mailbox);
+                if (msg_len) {
                     assert(msg_len % sizeof(*buffered_atomics) == 0);
+                    assert(msg_len <= MAX_BUFFERED_ATOMICS * sizeof(*buffered_atomics));
+
                     size_t nmsgs = msg_len / sizeof(*buffered_atomics);
                     for (unsigned m = 0; m < nmsgs; m++) {
                         atomics_msg_t<T> *msg = &buffered_atomics[m];
@@ -582,7 +499,7 @@ class ShmemML1D_Base {
         ShmemMemoryPool* pool;
         T* symm_reduce_dest;
         T* symm_reduce_src;
-        shmem_ml_cmd destroy_cmd;
+        shmem_ml_cmd<T> destroy_cmd;
 
 #ifdef ATOMICS_AS_MSGS
         mailbox_t atomics_mailbox;
@@ -1050,10 +967,16 @@ class ShmemML2D {
                 ) {
             _M = M;
             _N = N;
-            pool = ShmemMemoryPool::get();
             atomics_cb = _atomics_cb;
             int npes = shmem_n_pes();
             _rows_per_pe = (_M + npes - 1) / npes;
+            id = id_counter++;
+
+            shmem_ml_create_2d cmd(M, N);
+            send_cmd(&cmd);
+            shmem_barrier_all();
+
+            pool = ShmemMemoryPool::get();
 
             // Construct a simple schema for this table
             std::vector<std::shared_ptr<arrow::Field>> fields;
@@ -1084,9 +1007,13 @@ class ShmemML2D {
 
             _arrs = arrow::Table::Make(schema, columns, _rows_per_pe);
             _arrs->Validate();
+            shmem_barrier_all();
         }
 
         ~ShmemML2D() {
+            shmem_ml_destroy_2d cmd(id);
+            send_cmd(&cmd);
+
             // Collective destruction
             shmem_barrier_all();
         }
@@ -1160,6 +1087,7 @@ class ShmemML2D {
             }
         }
 
+        unsigned get_id() { return id; }
 
     private:
 
@@ -1182,6 +1110,7 @@ class ShmemML2D {
         std::shared_ptr<arrow::Table> _arrs;
         int64_t _M, _N;
         int64_t _rows_per_pe;
+        unsigned id;
         ShmemMemoryPool* pool;
         atomics_msg_2d_result_handler<double> atomics_cb;
 };
@@ -1319,6 +1248,82 @@ void shmem_ml_finalize();
 
 unsigned long long shmem_ml_current_time_us();
 
+template <typename T>
+bool cmd_handler(shmem_ml_command cmd, void* _payload, size_t payload_size,
+        std::map<unsigned, void*>& arrs) {
+    bool done = false;
+    shmem_ml_cmd_payload<T> *payload = (shmem_ml_cmd_payload<T>*)_payload;
+    assert(payload_size == sizeof(*payload));
+
+    switch (cmd) {
+        case (CREATE_1D): {
+            ShmemML1D<T> *arr = new ShmemML1D<T>(payload->create_1d.N);
+            arrs.insert(std::pair<unsigned, void*>(arr->get_id(), arr));
+            break;
+        }
+        case (DESTROY_1D): {
+            ShmemML1D<T>* arr = (ShmemML1D<T>*)arrs.at(payload->destroy_1d.id);
+            arrs.erase(arr->get_id());
+            delete arr;
+            break;
+        }
+        case (CREATE_2D): {
+            ShmemML2D *arr = new ShmemML2D(payload->create_2d.M,
+                    payload->create_2d.N);
+            arrs.insert(std::pair<unsigned, void*>(arr->get_id(), arr));
+            break;
+        }
+        case (DESTROY_2D): {
+            ShmemML2D* arr = (ShmemML2D*)arrs.at(payload->destroy_2d.id);
+            arrs.erase(arr->get_id());
+            delete arr;
+            break;
+        }
+        case (CLEAR_1D): {
+            ShmemML1D<T>* arr = (ShmemML1D<T>*)arrs.at(payload->clear_1d.id);
+            arr->clear(payload->clear_1d.val);
+            break;
+        }
+        case (CMD_DONE):
+            done = true;
+            break;
+        default:
+            fprintf(stderr, "ERROR: Unexpected command %d\n", cmd);
+            abort();
+    }
+    return done;
+}
+
+static inline void command_loop() {
+    std::map<unsigned, void*> arrs;
+
+    shmem_ml_cmd<uint8_t> *cmd = (shmem_ml_cmd<uint8_t>*)malloc(sizeof(*cmd));
+    assert(cmd);
+    size_t cmd_capacity = sizeof(*cmd);
+
+    bool done = false;
+    while (!done) {
+        int msg_len = mailbox_recv(cmd, cmd_capacity, &cmd_mailbox);
+        if (msg_len > 0) {
+            if (msg_len > cmd_capacity) {
+                /*
+                 * Not enough space in our cmd buffer to receive the current
+                 * message, realloc and loop again.
+                 */
+                cmd = (shmem_ml_cmd<uint8_t>*)realloc(cmd, msg_len);
+                assert(cmd);
+                cmd_capacity = msg_len;
+            } else {
+                done = cmd->handler(cmd->cmd, &cmd->payload,
+                        msg_len - offsetof(shmem_ml_cmd<uint8_t>, payload),
+                        arrs);
+            }
+        }
+    }
+
+    free(cmd);
+}
+
 
 template <typename lambda>
 static inline void shmem_ml_client_server_launch(lambda l) {
@@ -1332,7 +1337,7 @@ static inline void shmem_ml_client_server_launch(lambda l) {
     bool is_server = setup_client_server();
 
     mailbox_init(&cmd_mailbox, 32 * 1024 * 1024);
-    cmd_msg = mailbox_allocate_msg(sizeof(shmem_ml_cmd), &cmd_ctx);
+    cmd_msg = mailbox_allocate_msg(MAX_CMD_LEN, &cmd_ctx);
 
     if (is_server) {
         command_loop();
