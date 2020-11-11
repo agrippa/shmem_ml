@@ -25,10 +25,12 @@ typedef enum {
     DESTROY_2D,
     CLEAR_1D,
     SYNC_1D,
+    SYNC_2D,
     GET_1D,
     RAND_1D,
     RAND_2D,
     APPLY_1D,
+    APPLY_2D,
     CMD_DONE,
     CMD_INVALID
 } shmem_ml_command;
@@ -56,6 +58,9 @@ union shmem_ml_cmd_payload {
     } sync_1d;
     struct {
         unsigned id;
+    } sync_2d;
+    struct {
+        unsigned id;
     } rand_1d;
     struct {
         unsigned id;
@@ -63,6 +68,9 @@ union shmem_ml_cmd_payload {
     struct {
         unsigned id;
     } apply_1d;
+    struct {
+        unsigned id;
+    } apply_2d;
 };
 
 template <typename T>
@@ -180,6 +188,13 @@ struct shmem_ml_sync_1d : public shmem_ml_cmd<T> {
 };
 
 template <typename T>
+struct shmem_ml_sync_2d : public shmem_ml_cmd<T> {
+    shmem_ml_sync_2d(unsigned id) : shmem_ml_cmd<T>(SYNC_2D) {
+        this->payload.sync_2d.id = id;
+    }
+};
+
+template <typename T>
 struct shmem_ml_rand_1d : public shmem_ml_cmd<T> {
     shmem_ml_rand_1d(unsigned id) : shmem_ml_cmd<T>(RAND_1D) {
         this->payload.rand_1d.id = id;
@@ -190,6 +205,13 @@ template <typename T>
 struct shmem_ml_apply_1d : public shmem_ml_cmd<T> {
     shmem_ml_apply_1d(unsigned id) : shmem_ml_cmd<T>(APPLY_1D) {
         this->payload.apply_1d.id = id;
+    }
+};
+
+template <typename T>
+struct shmem_ml_apply_2d : public shmem_ml_cmd<T> {
+    shmem_ml_apply_2d(unsigned id) : shmem_ml_cmd<T>(APPLY_2D) {
+        this->payload.apply_2d.id = id;
     }
 };
 

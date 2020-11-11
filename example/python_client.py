@@ -28,5 +28,17 @@ vec = rand(vec)
 mat = rand(mat)
 
 vec = vec.apply(lambda i, x, vec: i / vec.N())
+mat = mat.apply(lambda i, j, x, mat: i / mat.M())
+
+vec.sync()
+mat.sync()
+
+# Validate that the applys above did what we wanted them to do.
+for i in range(vec.N()):
+    assert vec.get(i) == i / vec.N(), (i, vec.get(i), vec.get(i+1))
+
+for i in range(mat.M()):
+    for j in range(mat.N()):
+        assert mat.get(i, j) == i / mat.M()
 
 print('Success')

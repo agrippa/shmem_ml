@@ -1,7 +1,7 @@
 #!/bin/bash -l
 
 #SBATCH -J SHMEM_ML           # Job name
-#SBATCH -p normal        # Queue (partition) name
+#SBATCH -p development        # Queue (partition) name
 #SBATCH -N 1               # Total # of nodes (must be 1 for serial)
 #SBATCH --ntasks-per-node=56
 #SBATCH -t 00:05:00        # Run time (hh:mm:ss)

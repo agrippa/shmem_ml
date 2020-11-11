@@ -1080,7 +1080,11 @@ class ShmemML2D {
         int64_t M() { return _M; }
         int64_t rows_per_pe() { return _rows_per_pe; }
         void sync() {
+            shmem_ml_sync_2d<double> cmd(id);
+            send_cmd(&cmd);
+
             shmem_barrier_all();
+            end_cmd();
         }
 
         void clear(double v) {
@@ -1150,6 +1154,17 @@ class ShmemML2D {
         void send_rand_2d_cmd() {
             shmem_ml_rand_2d<double> cmd(id);
             send_cmd(&cmd);
+        }
+
+        void send_apply_2d_cmd(char* s, int length) {
+            shmem_ml_apply_2d<double> *cmd = (shmem_ml_apply_2d<double>*)malloc(
+                    sizeof(*cmd) + length);
+            assert(cmd);
+            new (cmd) shmem_ml_apply_2d<double>(id);
+            memcpy(cmd + 1, s, length);
+
+            send_cmd(cmd, sizeof(*cmd) + length);
+            free(cmd);
         }
 
     private:
@@ -1369,6 +1384,14 @@ shmem_ml_py_cmd cmd_handler(shmem_ml_command cmd, void* _payload,
             arr->sync();
             break;
         }
+        case (SYNC_2D): {
+#ifdef VERBOSE_CMD
+            fprintf(stderr, "PE %d SYNC_2D\n", shmem_my_pe());
+#endif
+            ShmemML2D* arr = (ShmemML2D*)lookup_array_in_namespace(payload->sync_2d.id);
+            arr->sync();
+            break;
+        }
         case (RAND_1D): {
 #ifdef VERBOSE_CMD
             fprintf(stderr, "PE %d RAND_1D id=%u\n", shmem_my_pe(), payload->rand_1d.id);
@@ -1400,6 +1423,23 @@ shmem_ml_py_cmd cmd_handler(shmem_ml_command cmd, void* _payload,
             serialized_func[serialized_func_length] = '\0';
 
             optional_cmd = shmem_ml_py_cmd(APPLY_1D, (void*)arr,
+                    serialized_func, serialized_func_length);
+            break;
+        }
+        case (APPLY_2D): {
+#ifdef VERBOSE_CMD
+            fprintf(stderr, "PE %d APPLY_2D id=%u\n", shmem_my_pe(),
+                    payload->apply_2d.id);
+#endif
+            ShmemML2D* arr = (ShmemML2D*)lookup_array_in_namespace(payload->apply_2d.id);
+            size_t serialized_func_length = payload_size - sizeof(*payload);
+
+            char *serialized_func = (char *)malloc(serialized_func_length + 1);
+            assert(serialized_func);
+            memcpy(serialized_func, payload + 1, serialized_func_length);
+            serialized_func[serialized_func_length] = '\0';
+
+            optional_cmd = shmem_ml_py_cmd(APPLY_2D, (void*)arr,
                     serialized_func, serialized_func_length);
             break;
         }

@@ -34,7 +34,7 @@ vec = rand(vec)
 mat = rand(mat)
 
 vec = vec.apply(lambda i, x, vec: i / vec.N())
-mat = mat.apply(lambda i, j, x: i / mat.M())
+mat = mat.apply(lambda i, j, x, mat: i / mat.M())
 
 if pe() == 0:
     print('Labels:')

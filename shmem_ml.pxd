@@ -29,6 +29,7 @@ cdef extern from "shmem_ml.hpp":
     cdef shmem_ml_command RAND_1D
     cdef shmem_ml_command RAND_2D
     cdef shmem_ml_command APPLY_1D
+    cdef shmem_ml_command APPLY_2D
     cdef shmem_ml_command CMD_DONE
     cdef shmem_ml_command CMD_INVALID
 
@@ -70,6 +71,7 @@ cdef extern from "shmem_ml.hpp":
         float get(int64_t row, int64_t col)
         void sync()
         void send_rand_2d_cmd()
+        void send_apply_2d_cmd(char* s, int length)
 
 
 cdef extern from "shmem.h":

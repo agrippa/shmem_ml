@@ -20,7 +20,7 @@ from shmem_ml cimport shmem_n_pes as c_shmem_n_pes
 from shmem_ml cimport end_cmd as c_end_cmd
 
 from shmem_ml cimport ShmemML1D, ReplicatedShmemML1D, ShmemML2D, \
-        shmem_ml_py_cmd, CMD_DONE, RAND_1D, RAND_2D, APPLY_1D
+        shmem_ml_py_cmd, CMD_DONE, RAND_1D, RAND_2D, APPLY_1D, APPLY_2D
 
 
 def shmem_ml_finalize():
@@ -95,7 +95,7 @@ cdef class PyShmemML1DD:
         np_arr = arrow_arr.to_numpy(zero_copy_only=True, writable=False)
         out_np_arr = np.zeros(len(np_arr))
         for i in range(len(np_arr)):
-            out_np_arr[i] = f(i, np_arr[i], self)
+            out_np_arr[i] = f(self.local_slice_start() + i, np_arr[i], self)
 
         new_dist_arr = PyShmemML1DD(self.N())
         new_dist_arr.update_from_arrow(pyarrow.array(out_np_arr))
@@ -150,16 +150,20 @@ cdef class PyShmemML2DD:
         return gathered
 
     def apply(self, f):
+        serialized = dill.dumps(f)
+        self.c_mat.send_apply_2d_cmd(serialized, len(serialized))
+
         arrow_table = self.get_local_arrow_table()
         arrow_table = arrow_table.to_pandas(zero_copy_only=True, split_blocks=True)
         result = pd.DataFrame(np.zeros((arrow_table.shape)))
 
         for i in range(arrow_table.shape[0]):
             for j in range(arrow_table.shape[1]):
-                result.iloc[i, j] = f(i, j, arrow_table.iloc[i, j])
+                result.iloc[i, j] = f(pe() * self.rows_per_pe() + i, j, arrow_table.iloc[i, j], self)
         dist_mat = PyShmemML2DD(self.M(), self.N())
         dist_mat.update_from_arrow(pyarrow.table(result))
         dist_mat.sync()
+        c_end_cmd()
         return dist_mat
 
     def send_rand_2d_cmd(self):
@@ -222,6 +226,17 @@ def shmem_ml_command_loop():
             f = dill.loads(py_s)
 
             wrapped_vec.apply(f)
+        elif <int>py_cmd.get_cmd() == <int>APPLY_2D:
+            c_mat = <ShmemML2D*>py_cmd.get_arr()
+            wrapped_mat = PyShmemML2DD(0, 0)
+            wrapped_mat.c_mat = c_mat
+
+            s = py_cmd.get_str()
+            l = py_cmd.get_str_length()
+            py_s = s[:l]
+            f = dill.loads(py_s)
+
+            wrapped_mat.apply(f)
         else:
             raise Exception('Unexpected command ' + str(<int>py_cmd.get_cmd()))
 
