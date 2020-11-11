@@ -4,7 +4,7 @@
 #SBATCH -p development        # Queue (partition) name
 #SBATCH -N 1               # Total # of nodes (must be 1 for serial)
 #SBATCH --ntasks-per-node=56
-#SBATCH -t 00:05:00        # Run time (hh:mm:ss)
+#SBATCH -t 00:10:00        # Run time (hh:mm:ss)
 #SBATCH --mail-type=all    # Send email at begin and end of job
 #SBATCH --mail-user=max.grossman@gatech.edu
 #SBATCH --exclusive
@@ -42,3 +42,4 @@ export SLURM_ARGS="--ntasks=$(($SLURM_NNODES * $CORES_PER_NODE)) --ntasks-per-so
 echo
 
 oshrun -N 56 $HOME/shmem_ml/bin/shmem_ml_client_server $HOME/shmem_ml/example/python_client.py
+# oshrun -N 2 $HOME/shmem_ml/bin/shmem_ml_client_server $HOME/shmem_ml/example/python_client.py

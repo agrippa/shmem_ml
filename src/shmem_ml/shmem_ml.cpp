@@ -37,6 +37,28 @@ void* delete_array_in_namespace(unsigned id) {
     return arr;
 }
 
+void send_sgd_fit_cmd(unsigned x_id, unsigned y_id, char *serialized_model,
+        int serialized_model_length) {
+    shmem_ml_sgd_fit *cmd = (shmem_ml_sgd_fit*)malloc(sizeof(*cmd) + serialized_model_length);
+    assert(cmd);
+    new (cmd) shmem_ml_sgd_fit(x_id, y_id);
+    memcpy(cmd + 1, serialized_model, serialized_model_length);
+
+    send_cmd(cmd, sizeof(*cmd) + serialized_model_length);
+    free(cmd);
+}
+
+void send_sgd_predict_cmd(unsigned x_id, char *serialized_model,
+        int serialized_model_length) {
+    shmem_ml_sgd_predict *cmd = (shmem_ml_sgd_predict*)malloc(sizeof(*cmd) + serialized_model_length);
+    assert(cmd);
+    new (cmd) shmem_ml_sgd_predict(x_id);
+    memcpy(cmd + 1, serialized_model, serialized_model_length);
+
+    send_cmd(cmd, sizeof(*cmd) + serialized_model_length);
+    free(cmd);
+}
+
 template <>
 cmd_handler_ptr get_typed_cmd_handler<double>() {
     return cmd_handler<double>;

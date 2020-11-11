@@ -41,4 +41,16 @@ for i in range(mat.M()):
     for j in range(mat.N()):
         assert mat.get(i, j) == i / mat.M()
 
+niters = 10
+clf = SGDRegressor(max_iter=niters)
+vec.sync()
+
+start_dist_fit = time.time()
+clf.fit(mat, vec)
+start_dist_predict = time.time()
+pred = clf.predict(mat)
+end_dist_predict = time.time()
+
+print('Distributed fit took ' + str(start_dist_predict - start_dist_fit) + ' s')
+print('Distributed predict took ' + str(end_dist_predict - start_dist_predict) + ' s')
 print('Success')

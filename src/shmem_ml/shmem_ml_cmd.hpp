@@ -31,6 +31,8 @@ typedef enum {
     RAND_2D,
     APPLY_1D,
     APPLY_2D,
+    SGD_FIT,
+    SGD_PREDICT,
     CMD_DONE,
     CMD_INVALID
 } shmem_ml_command;
@@ -71,6 +73,13 @@ union shmem_ml_cmd_payload {
     struct {
         unsigned id;
     } apply_2d;
+    struct {
+        unsigned x_id;
+        unsigned y_id;
+    } sgd_fit;
+    struct {
+        unsigned x_id;
+    } sgd_predict;
 };
 
 template <typename T>
@@ -219,6 +228,19 @@ template <typename T>
 struct shmem_ml_rand_2d : public shmem_ml_cmd<T> {
     shmem_ml_rand_2d(unsigned id) : shmem_ml_cmd<T>(RAND_2D) {
         this->payload.rand_2d.id = id;
+    }
+};
+
+struct shmem_ml_sgd_fit : public shmem_ml_cmd<double> {
+    shmem_ml_sgd_fit(unsigned _x_id, unsigned _y_id) : shmem_ml_cmd<double>(SGD_FIT) {
+        this->payload.sgd_fit.x_id = _x_id;
+        this->payload.sgd_fit.y_id = _y_id;
+    }
+};
+
+struct shmem_ml_sgd_predict : public shmem_ml_cmd<double> {
+    shmem_ml_sgd_predict(unsigned _x_id) : shmem_ml_cmd<double>(SGD_PREDICT) {
+        this->payload.sgd_predict.x_id = _x_id;
     }
 };
 

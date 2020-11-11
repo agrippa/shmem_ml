@@ -14,6 +14,8 @@ cdef extern from "shmem_ml.hpp":
     cpdef void shmem_ml_init()
     cpdef void shmem_ml_finalize()
     cpdef void end_cmd()
+    cpdef void send_sgd_fit_cmd(unsigned x_id, unsigned y_id, char* s, int s_length)
+    cpdef void send_sgd_predict_cmd(unsigned x_id, char* s, int s_length)
 
     cdef cppclass shmem_ml_command:
         pass
@@ -30,6 +32,8 @@ cdef extern from "shmem_ml.hpp":
     cdef shmem_ml_command RAND_2D
     cdef shmem_ml_command APPLY_1D
     cdef shmem_ml_command APPLY_2D
+    cdef shmem_ml_command SGD_FIT
+    cdef shmem_ml_command SGD_PREDICT
     cdef shmem_ml_command CMD_DONE
     cdef shmem_ml_command CMD_INVALID
 
@@ -45,12 +49,14 @@ cdef extern from "shmem_ml.hpp":
         void update_from_arrow_array(shared_ptr[CArray] src)
         void send_rand_1d_cmd()
         void send_apply_1d_cmd(char* s, int length)
+        unsigned get_id()
 
     cdef cppclass shmem_ml_py_cmd:
         shmem_ml_command get_cmd()
         void* get_arr()
         char* get_str()
         int get_str_length()
+        void *get_arr_2()
 
     cpdef shmem_ml_py_cmd command_loop()
 
@@ -72,6 +78,7 @@ cdef extern from "shmem_ml.hpp":
         void sync()
         void send_rand_2d_cmd()
         void send_apply_2d_cmd(char* s, int length)
+        unsigned get_id()
 
 
 cdef extern from "shmem.h":

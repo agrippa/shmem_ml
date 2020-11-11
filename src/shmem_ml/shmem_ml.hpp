@@ -39,6 +39,12 @@ void add_array_to_namespace(unsigned id, void *arr);
 void* lookup_array_in_namespace(unsigned id);
 void* delete_array_in_namespace(unsigned id);
 
+void send_sgd_fit_cmd(unsigned x_id, unsigned y_id, char *serialized_model,
+        int serialized_model_length);
+
+void send_sgd_predict_cmd(unsigned x_id, char *serialized_model,
+        int serialized_model_length);
+
 template <typename T>
 class ShmemML1D;
 
@@ -50,17 +56,20 @@ class shmem_ml_py_cmd {
         void *arr;
         char *str;
         int str_length;
+        void *arr_2;
 
     public:
-        shmem_ml_py_cmd() : cmd(CMD_INVALID), arr(NULL), str(NULL), str_length(0) { }
+        shmem_ml_py_cmd() : cmd(CMD_INVALID), arr(NULL), str(NULL),
+                str_length(0), arr_2(NULL) { }
         shmem_ml_py_cmd(shmem_ml_command _cmd, void *_arr, char *_str,
-                int _str_length) : cmd(_cmd), arr(_arr), str(_str),
-            str_length(_str_length) { }
+                int _str_length, void *_arr_2) : cmd(_cmd), arr(_arr),
+            str(_str), str_length(_str_length), arr_2(_arr_2) { }
 
         shmem_ml_command get_cmd() { return cmd; }
         void* get_arr() { return arr; }
         char* get_str() { return str; }
         int get_str_length() { return str_length; }
+        void *get_arr_2() { return arr_2; }
 };
 
 shmem_ml_py_cmd command_loop();
@@ -1397,7 +1406,7 @@ shmem_ml_py_cmd cmd_handler(shmem_ml_command cmd, void* _payload,
             fprintf(stderr, "PE %d RAND_1D id=%u\n", shmem_my_pe(), payload->rand_1d.id);
 #endif
             ShmemML1D<T>* arr = (ShmemML1D<T>*)lookup_array_in_namespace(payload->rand_1d.id);
-            optional_cmd = shmem_ml_py_cmd(RAND_1D, (void*)arr, NULL, 0);
+            optional_cmd = shmem_ml_py_cmd(RAND_1D, (void*)arr, NULL, 0, NULL);
             break;
         }
         case (RAND_2D): {
@@ -1406,7 +1415,7 @@ shmem_ml_py_cmd cmd_handler(shmem_ml_command cmd, void* _payload,
                     payload->rand_2d.id);
 #endif
             ShmemML2D* arr = (ShmemML2D*)lookup_array_in_namespace(payload->rand_2d.id);
-            optional_cmd = shmem_ml_py_cmd(RAND_2D, (void*)arr, NULL, 0);
+            optional_cmd = shmem_ml_py_cmd(RAND_2D, (void*)arr, NULL, 0, NULL);
             break;
         }
         case (APPLY_1D): {
@@ -1423,7 +1432,7 @@ shmem_ml_py_cmd cmd_handler(shmem_ml_command cmd, void* _payload,
             serialized_func[serialized_func_length] = '\0';
 
             optional_cmd = shmem_ml_py_cmd(APPLY_1D, (void*)arr,
-                    serialized_func, serialized_func_length);
+                    serialized_func, serialized_func_length, NULL);
             break;
         }
         case (APPLY_2D): {
@@ -1440,14 +1449,55 @@ shmem_ml_py_cmd cmd_handler(shmem_ml_command cmd, void* _payload,
             serialized_func[serialized_func_length] = '\0';
 
             optional_cmd = shmem_ml_py_cmd(APPLY_2D, (void*)arr,
-                    serialized_func, serialized_func_length);
+                    serialized_func, serialized_func_length, NULL);
             break;
         }
+        case (SGD_FIT): {
+#ifdef VERBOSE_CMD
+            fprintf(stderr, "PE %d SGD_FIT x_id=%u y_id=%u\n", shmem_my_pe(),
+                    payload->sgd_fit.x_id, payload->sgd_fit.y_id);
+#endif
+            unsigned x_id = payload->sgd_fit.x_id;
+            unsigned y_id = payload->sgd_fit.y_id;
+            ShmemML2D* x_arr = (ShmemML2D*)lookup_array_in_namespace(x_id);
+            ShmemML1D<double>* y_arr = (ShmemML1D<double>*)lookup_array_in_namespace(y_id);
+
+            size_t serialized_model_length = payload_size - sizeof(*payload);
+
+            char *serialized_model = (char *)malloc(serialized_model_length + 1);
+            assert(serialized_model);
+            memcpy(serialized_model, payload + 1, serialized_model_length);
+            serialized_model[serialized_model_length] = '\0';
+
+            optional_cmd = shmem_ml_py_cmd(SGD_FIT, (void*)x_arr,
+                    serialized_model, serialized_model_length, (void*)y_arr);
+            break;
+        }
+        case (SGD_PREDICT): {
+#ifdef VERBOSE_CMD
+            fprintf(stderr, "PE %d SGD_PREDICT x_id=%u\n", shmem_my_pe(),
+                    payload->sgd_predict.x_id);
+#endif
+            unsigned x_id = payload->sgd_predict.x_id;
+            ShmemML2D* x_arr = (ShmemML2D*)lookup_array_in_namespace(x_id);
+
+            size_t serialized_model_length = payload_size - sizeof(*payload);
+
+            char *serialized_model = (char *)malloc(serialized_model_length + 1);
+            assert(serialized_model);
+            memcpy(serialized_model, payload + 1, serialized_model_length);
+            serialized_model[serialized_model_length] = '\0';
+
+            optional_cmd = shmem_ml_py_cmd(SGD_PREDICT, (void*)x_arr,
+                    serialized_model, serialized_model_length, NULL);
+            break;
+        }
+
         case (CMD_DONE):
 #ifdef VERBOSE_CMD
             fprintf(stderr, "PE %d CMD_DONE\n", shmem_my_pe());
 #endif
-            optional_cmd = shmem_ml_py_cmd(CMD_DONE, NULL, NULL, 0);
+            optional_cmd = shmem_ml_py_cmd(CMD_DONE, NULL, NULL, 0, NULL);
             break;
         default:
 #ifdef VERBOSE_CMD

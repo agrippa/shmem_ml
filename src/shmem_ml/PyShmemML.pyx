@@ -18,9 +18,12 @@ from shmem_ml cimport command_loop as c_command_loop
 from shmem_ml cimport shmem_my_pe as c_shmem_my_pe
 from shmem_ml cimport shmem_n_pes as c_shmem_n_pes
 from shmem_ml cimport end_cmd as c_end_cmd
+from shmem_ml cimport send_sgd_fit_cmd as c_send_sgd_fit_cmd
+from shmem_ml cimport send_sgd_predict_cmd as c_send_sgd_predict_cmd
 
 from shmem_ml cimport ShmemML1D, ReplicatedShmemML1D, ShmemML2D, \
-        shmem_ml_py_cmd, CMD_DONE, RAND_1D, RAND_2D, APPLY_1D, APPLY_2D
+        shmem_ml_py_cmd, CMD_DONE, RAND_1D, RAND_2D, APPLY_1D, APPLY_2D, \
+        SGD_FIT, SGD_PREDICT
 
 
 def shmem_ml_finalize():
@@ -106,6 +109,9 @@ cdef class PyShmemML1DD:
     def send_rand_1d_cmd(self):
         self.c_vec.send_rand_1d_cmd()
 
+    def get_id(self):
+        return self.c_vec.get_id()
+
 cdef class PyShmemML2DD:
     cdef ShmemML2D* c_mat
 
@@ -168,6 +174,9 @@ cdef class PyShmemML2DD:
 
     def send_rand_2d_cmd(self):
         self.c_mat.send_rand_2d_cmd()
+
+    def get_id(self):
+        return self.c_mat.get_id()
 
 
 cdef class PyReplicatedShmemML1DD:
@@ -237,6 +246,34 @@ def shmem_ml_command_loop():
             f = dill.loads(py_s)
 
             wrapped_mat.apply(f)
+        elif <int>py_cmd.get_cmd() == <int>SGD_FIT:
+            c_mat = <ShmemML2D*>py_cmd.get_arr()
+            c_vec = <ShmemML1D[double]*>py_cmd.get_arr_2()
+
+            wrapped_mat = PyShmemML2DD(0, 0)
+            wrapped_mat.c_mat = c_mat
+
+            wrapped_vec = PyShmemML1DD(0)
+            wrapped_vec.c_vec = c_vec
+
+            s = py_cmd.get_str()
+            l = py_cmd.get_str_length()
+            py_s = s[:l]
+            m = dill.loads(py_s)
+
+            m.fit(wrapped_mat, wrapped_vec)
+        elif <int>py_cmd.get_cmd() == <int>SGD_PREDICT:
+            c_mat = <ShmemML2D*>py_cmd.get_arr()
+
+            wrapped_mat = PyShmemML2DD(0, 0)
+            wrapped_mat.c_mat = c_mat
+
+            s = py_cmd.get_str()
+            l = py_cmd.get_str_length()
+            py_s = s[:l]
+            m = dill.loads(py_s)
+
+            m.predict(wrapped_mat)
         else:
             raise Exception('Unexpected command ' + str(<int>py_cmd.get_cmd()))
 
@@ -301,6 +338,9 @@ class SGDRegressor:
         assert isinstance(x, PyShmemML2DD)
         assert isinstance(y, PyShmemML1DD)
 
+        serialized = dill.dumps(self)
+        c_send_sgd_fit_cmd(x.get_id(), y.get_id(), serialized, len(serialized))
+
         x_arr = x.get_local_arrow_table()
         x_arr = x_arr.to_pandas(zero_copy_only=True, split_blocks=True)
 
@@ -349,15 +389,22 @@ class SGDRegressor:
             self._update_coef_intercept(prev_coef, prev_intercept,
                     all_coef_grads, all_intercept_grads)
 
+        c_end_cmd()
+
 
     def predict(self, x):
         assert isinstance(x, PyShmemML2DD)
+
+        serialized = dill.dumps(self)
+        c_send_sgd_predict_cmd(x.get_id(), serialized, len(serialized))
+
         x_arr = x.get_local_arrow_table().to_pandas(zero_copy_only=True, split_blocks=True)
 
         pred = self.model.predict(x_arr)
 
         dist_pred = PyShmemML1DD(x.M())
         dist_pred.update_from_arrow(pyarrow.array(pred))
+        c_end_cmd()
         return dist_pred
 
 
