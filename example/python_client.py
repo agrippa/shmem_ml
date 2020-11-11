@@ -51,6 +51,33 @@ start_dist_predict = time.time()
 pred = clf.predict(mat)
 end_dist_predict = time.time()
 
-print('Distributed fit took ' + str(start_dist_predict - start_dist_fit) + ' s')
+print('Distributed predictions with N=' + str(pred.N()) + ', # iters=' + str(niters))
+for i in range(10 if pred.N() > 10 else pred.N()):
+    print('  ' + str(pred.get(i)))
+if pred.N() > 10:
+    print('  ...')
+print('')
+
+gathered_lbls = vec.gather()
+gathered_features = mat.gather()
+
+sk_model = sklearn.linear_model.SGDRegressor(max_iter=niters, tol=None)
+start_local_fit = time.time()
+sk_model.fit(gathered_features, gathered_lbls)
+elapsed_local_fit = time.time() - start_local_fit
+sk_pred = sk_model.predict(gathered_features)
+print('Local predictions with sklearn and # iters=' + str(niters) + ':')
+for i in range(10 if pred.N() > 10 else pred.N()):
+    print('  ' + str(sk_pred[i]))
+if pred.N() > 10:
+    print('  ...')
+
+print('Distributed training took ' + str(start_dist_predict - start_dist_fit) + ' s')
 print('Distributed predict took ' + str(end_dist_predict - start_dist_predict) + ' s')
+print('Local training took ' + str(elapsed_local_fit) + ' s')
+print('')
+print(sk_model.__dict__)
+
+pred.sync()
+
 print('Success')
