@@ -13,6 +13,24 @@ cdef extern from "stdint.h":
 cdef extern from "shmem_ml.hpp":
     cpdef void shmem_ml_init()
     cpdef void shmem_ml_finalize()
+    cpdef void end_cmd()
+
+    cdef cppclass shmem_ml_command:
+        pass
+
+    # From shmem_ml_cmd.hpp
+    cdef shmem_ml_command CREATE_1D
+    cdef shmem_ml_command DESTROY_1D
+    cdef shmem_ml_command CREATE_2D
+    cdef shmem_ml_command DESTROY_2D
+    cdef shmem_ml_command CLEAR_1D
+    cdef shmem_ml_command SYNC_1D
+    cdef shmem_ml_command GET_1D
+    cdef shmem_ml_command RAND_1D
+    cdef shmem_ml_command RAND_2D
+    cdef shmem_ml_command APPLY_1D
+    cdef shmem_ml_command CMD_DONE
+    cdef shmem_ml_command CMD_INVALID
 
     cdef cppclass ShmemML1D[T]:
         ShmemML1D(int64_t) except +
@@ -24,6 +42,16 @@ cdef extern from "shmem_ml.hpp":
         int64_t local_slice_end()
         shared_ptr[CArray] get_arrow_array()
         void update_from_arrow_array(shared_ptr[CArray] src)
+        void send_rand_1d_cmd()
+        void send_apply_1d_cmd(char* s, int length)
+
+    cdef cppclass shmem_ml_py_cmd:
+        shmem_ml_command get_cmd()
+        void* get_arr()
+        char* get_str()
+        int get_str_length()
+
+    cpdef shmem_ml_py_cmd command_loop()
 
     cdef cppclass ReplicatedShmemML1D[T]:
         ReplicatedShmemML1D(int64_t) except +
@@ -41,6 +69,7 @@ cdef extern from "shmem_ml.hpp":
         void update_from_arrow_table(shared_ptr[CTable] src)
         float get(int64_t row, int64_t col)
         void sync()
+        void send_rand_2d_cmd()
 
 
 cdef extern from "shmem.h":

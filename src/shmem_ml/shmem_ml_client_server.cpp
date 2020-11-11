@@ -9,12 +9,7 @@ int main(int argc, char **argv) {
 
     shmem_init();
 
-    shmem_ml_client_server_launch([&] {
-            Py_Initialize();
-            FILE *fp = fopen(argv[1], "r");
-            PyRun_SimpleFileExFlags(fp, argv[1], 1, NULL);
-            Py_Finalize();
-        });
+    py_shmem_ml_client_server_launch(argv[1]);
 
     shmem_finalize();
 

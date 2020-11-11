@@ -4,6 +4,7 @@ import pyarrow
 from pyarrow.lib cimport *
 
 import sys
+import dill
 import atexit
 import numpy as np
 import pandas as pd
@@ -13,10 +14,13 @@ from sklearn.linear_model import SGDRegressor as SK_SGDRegressor
 
 from shmem_ml cimport shmem_ml_init as c_shmem_ml_init
 from shmem_ml cimport shmem_ml_finalize as c_shmem_ml_finalize
+from shmem_ml cimport command_loop as c_command_loop
 from shmem_ml cimport shmem_my_pe as c_shmem_my_pe
 from shmem_ml cimport shmem_n_pes as c_shmem_n_pes
+from shmem_ml cimport end_cmd as c_end_cmd
 
-from shmem_ml cimport ShmemML1D, ReplicatedShmemML1D, ShmemML2D
+from shmem_ml cimport ShmemML1D, ReplicatedShmemML1D, ShmemML2D, \
+        shmem_ml_py_cmd, CMD_DONE, RAND_1D, RAND_2D, APPLY_1D
 
 
 def shmem_ml_finalize():
@@ -35,10 +39,21 @@ cdef class PyShmemML1DD:
     cdef ShmemML1D[double]* c_vec
 
     def __cinit__(self, int64_t N):
-        self.c_vec = new ShmemML1D[double](N)
+        if N == 0:
+            self.c_vec = NULL
+        else:
+            self.c_vec = new ShmemML1D[double](N)
 
     def __dealloc__(self):
-        del self.c_vec
+        # The challenge with automatically de-allocating the underlying C data
+        # structure is that there may be no references to this in Python, but we
+        # may still be able to access it (e.g. in client-server mode where we
+        # access by ID). Need to consider a better solution than just not
+        # freeing memory. Maybe on servers we manually place a reference on all
+        # of these objects and don't release until receiving an explicit destroy
+        # command.
+        pass
+        # del self.c_vec
 
     def clear(self, double clear_to):
         self.c_vec.clear(clear_to)
@@ -73,26 +88,36 @@ cdef class PyShmemML1DD:
         return gathered
 
     def apply(self, f):
+        serialized = dill.dumps(f)
+        self.c_vec.send_apply_1d_cmd(serialized, len(serialized))
+
         arrow_arr = pyarrow_wrap_array(self.c_vec.get_arrow_array())
         np_arr = arrow_arr.to_numpy(zero_copy_only=True, writable=False)
         out_np_arr = np.zeros(len(np_arr))
         for i in range(len(np_arr)):
-            out_np_arr[i] = f(i, np_arr[i])
+            out_np_arr[i] = f(i, np_arr[i], self)
 
         new_dist_arr = PyShmemML1DD(self.N())
         new_dist_arr.update_from_arrow(pyarrow.array(out_np_arr))
         new_dist_arr.sync()
+        c_end_cmd()
         return new_dist_arr
 
+    def send_rand_1d_cmd(self):
+        self.c_vec.send_rand_1d_cmd()
 
 cdef class PyShmemML2DD:
     cdef ShmemML2D* c_mat
 
     def __cinit__(self, int64_t M, int64_t N):
-        self.c_mat = new ShmemML2D(M, N)
+        if M == 0 and N == 0:
+            self.c_mat = NULL
+        else:
+            self.c_mat = new ShmemML2D(M, N)
 
     def __dealloc__(self):
-        del self.c_mat
+        pass
+        # del self.c_mat
 
     def N(self):
         return self.c_mat.N()
@@ -137,6 +162,9 @@ cdef class PyShmemML2DD:
         dist_mat.sync()
         return dist_mat
 
+    def send_rand_2d_cmd(self):
+        self.c_mat.send_rand_2d_cmd()
+
 
 cdef class PyReplicatedShmemML1DD:
     cdef ReplicatedShmemML1D[double]* c_vec
@@ -145,7 +173,8 @@ cdef class PyReplicatedShmemML1DD:
         self.c_vec = new ReplicatedShmemML1D[double](N)
 
     def __dealloc__(self):
-        del self.c_vec
+        pass
+        # del self.c_vec
 
     def update_from_arrow(self, arrow_arr):
         cdef shared_ptr[CArray] arr = pyarrow_unwrap_array(arrow_arr)
@@ -160,20 +189,62 @@ cdef class PyReplicatedShmemML1DD:
     def bcast(self, src_rank):
         self.c_vec.bcast(src_rank)
 
+def shmem_ml_command_loop():
+    cdef ShmemML1D[double]* c_vec
+    cdef ShmemML2D* c_mat
+    cdef shmem_ml_py_cmd py_cmd
+    cdef char* s
+    cdef bytes py_s
+    done = False
+
+    while not done:
+        py_cmd = c_command_loop()
+        if <int>py_cmd.get_cmd() == <int>CMD_DONE:
+            done = True
+        elif <int>py_cmd.get_cmd() == <int>RAND_1D:
+            c_vec = <ShmemML1D[double]*>py_cmd.get_arr()
+            wrapped_vec = PyShmemML1DD(0)
+            wrapped_vec.c_vec = c_vec
+            rand(wrapped_vec)
+        elif <int>py_cmd.get_cmd() == <int>RAND_2D:
+            c_mat = <ShmemML2D*>py_cmd.get_arr()
+            wrapped_mat = PyShmemML2DD(0, 0)
+            wrapped_mat.c_mat = c_mat
+            rand(wrapped_mat)
+        elif <int>py_cmd.get_cmd() == <int>APPLY_1D:
+            c_vec = <ShmemML1D[double]*>py_cmd.get_arr()
+            wrapped_vec = PyShmemML1DD(0)
+            wrapped_vec.c_vec = c_vec
+
+            s = py_cmd.get_str()
+            l = py_cmd.get_str_length()
+            py_s = s[:l]
+            f = dill.loads(py_s)
+
+            wrapped_vec.apply(f)
+        else:
+            raise Exception('Unexpected command ' + str(<int>py_cmd.get_cmd()))
+
 
 def rand(vec):
     if isinstance(vec, PyShmemML1DD):
+        vec.send_rand_1d_cmd()
+
         arr = vec.get_local_arrow_array()
         np_arr = arr.to_numpy(zero_copy_only=False, writable=True)
         np_arr[:] = np.random.rand(np_arr.shape[0])
         pyarr = pyarrow.array(np_arr)
         vec.update_from_arrow(pyarr)
+        c_end_cmd()
         return vec
     elif isinstance(vec, PyShmemML2DD):
+        vec.send_rand_2d_cmd()
+
         np_arr = np.random.rand(vec.rows_per_pe(), vec.N())
         pd_arr = pd.DataFrame(np_arr)
         arrow_table = pyarrow.Table.from_pandas(pd_arr)
         vec.update_from_arrow(arrow_table)
+        c_end_cmd()
         return vec
     else:
         assert False, str(type(vec))

@@ -1,7 +1,7 @@
 #!/bin/bash -l
 
 #SBATCH -J SHMEM_ML           # Job name
-#SBATCH -p development        # Queue (partition) name
+#SBATCH -p normal        # Queue (partition) name
 #SBATCH -N 1               # Total # of nodes (must be 1 for serial)
 #SBATCH --ntasks-per-node=56
 #SBATCH -t 00:05:00        # Run time (hh:mm:ss)
@@ -41,5 +41,4 @@ export SLURM_ARGS="--ntasks=$(($SLURM_NNODES * $CORES_PER_NODE)) --ntasks-per-so
 
 echo
 
-# oshrun -N 56 $HOME/shmem_ml/bin/shmem_ml_client_server $HOME/shmem_ml/example/python_client.py
-oshrun -N 2 $HOME/shmem_ml/bin/shmem_ml_client_server $HOME/shmem_ml/example/python_client.py
+oshrun -N 56 $HOME/shmem_ml/bin/shmem_ml_client_server $HOME/shmem_ml/example/python_client.py

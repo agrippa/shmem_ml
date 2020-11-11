@@ -19,6 +19,7 @@
 #include <sstream>
 #include <dlfcn.h>
 
+// #define VERBOSE_CMD
 #define UNUSED_VAR(x) (void)(x)
 #define BITS_PER_BYTE 8
 
@@ -26,22 +27,47 @@
 
 #define SHMEMML_MAX(_a, _b) (((_a) > (_b)) ? (_a) : (_b))
 
-#ifdef ATOMICS_AS_MSGS
-#define MAX_BUFFERED_ATOMICS 4096
-
-void *aborting_thread(void *user_data);
-
 extern volatile int this_pe_has_exited;
 extern int id_counter;
 extern mailbox_t cmd_mailbox;
 extern shmem_ctx_t cmd_ctx;
 
+void *aborting_thread(void *user_data);
+
 bool setup_client_server();
+void add_array_to_namespace(unsigned id, void *arr);
+void* lookup_array_in_namespace(unsigned id);
+void* delete_array_in_namespace(unsigned id);
 
 template <typename T>
 class ShmemML1D;
 
 class ShmemML2D;
+
+class shmem_ml_py_cmd {
+    private:
+        shmem_ml_command cmd;
+        void *arr;
+        char *str;
+        int str_length;
+
+    public:
+        shmem_ml_py_cmd() : cmd(CMD_INVALID), arr(NULL), str(NULL), str_length(0) { }
+        shmem_ml_py_cmd(shmem_ml_command _cmd, void *_arr, char *_str,
+                int _str_length) : cmd(_cmd), arr(_arr), str(_str),
+            str_length(_str_length) { }
+
+        shmem_ml_command get_cmd() { return cmd; }
+        void* get_arr() { return arr; }
+        char* get_str() { return str; }
+        int get_str_length() { return str_length; }
+};
+
+shmem_ml_py_cmd command_loop();
+
+#ifdef ATOMICS_AS_MSGS
+
+#define MAX_BUFFERED_ATOMICS 4096
 
 typedef enum {
     CAS = 0,
@@ -63,7 +89,6 @@ using atomics_msg_1d_result_handler = void (*)(ShmemML1D<T>* arr,
 template<typename T>
 using atomics_msg_2d_result_handler = void (*)(ShmemML2D* arr,
         int64_t row, int64_t col, atomics_msg_op_t, T prev_val, T new_val);
-
 #endif
 
 #define _BITS_PER_BYTE 8
@@ -172,6 +197,8 @@ class ShmemML1D_Base {
             // Ensure all PEs have completed construction
             shmem_barrier_all();
 #endif
+            add_array_to_namespace(id, this);
+            end_cmd();
         }
 
         void clear(T init_val) {
@@ -186,6 +213,7 @@ class ShmemML1D_Base {
             }
 
             shmem_barrier_all();
+            end_cmd();
         }
 
         ~ShmemML1D_Base() {
@@ -194,11 +222,14 @@ class ShmemML1D_Base {
             // Collective destruction
             shmem_barrier_all();
 
+#ifdef ATOMICS_AS_MSGS
             mailbox_destroy(&atomics_mailbox);
+#endif
             shmem_free(symm_reduce_dest);
             shmem_free(symm_reduce_src);
             shmem_free(pwork);
             shmem_free(psync);
+            end_cmd();
         }
 
         inline int64_t N() { return _N; }
@@ -306,6 +337,9 @@ class ShmemML1D_Base {
 #endif
 
         void sync() {
+            shmem_ml_sync_1d<T> cmd(id);
+            send_cmd(&cmd);
+
 #ifdef ATOMICS_AS_MSGS
             atomics_msg_t<T> msg;
             msg.op = DONE;
@@ -335,6 +369,7 @@ class ShmemML1D_Base {
             n_done_pes = 0;
 #endif
             shmem_barrier_all();
+            end_cmd();
         }
 
         void save(const char *filename) {
@@ -424,6 +459,22 @@ class ShmemML1D_Base {
             }
         }
 
+        void send_rand_1d_cmd() {
+            shmem_ml_rand_1d<T> cmd(id);
+            send_cmd(&cmd);
+        }
+
+        void send_apply_1d_cmd(char* s, int length) {
+            shmem_ml_apply_1d<T> *cmd = (shmem_ml_apply_1d<T>*)malloc(
+                    sizeof(*cmd) + length);
+            assert(cmd);
+            new (cmd) shmem_ml_apply_1d<T>(id);
+            memcpy(cmd + 1, s, length);
+
+            send_cmd(cmd, sizeof(*cmd) + length);
+            free(cmd);
+        }
+
         unsigned get_id() { return id; }
 
         virtual inline T* raw_slice() = 0;
@@ -442,8 +493,9 @@ class ShmemML1D_Base {
 
 #ifdef ATOMICS_AS_MSGS
         void process_atomic_msgs() {
-            int success;
+            int success = 1;
             do {
+                success = 0;
                 T old_val, new_val;
                 int msg_len = mailbox_recv(buffered_atomics,
                         MAX_BUFFERED_ATOMICS * sizeof(*buffered_atomics),
@@ -451,6 +503,7 @@ class ShmemML1D_Base {
                 if (msg_len) {
                     assert(msg_len % sizeof(*buffered_atomics) == 0);
                     assert(msg_len <= MAX_BUFFERED_ATOMICS * sizeof(*buffered_atomics));
+                    success = 1;
 
                     size_t nmsgs = msg_len / sizeof(*buffered_atomics);
                     for (unsigned m = 0; m < nmsgs; m++) {
@@ -967,7 +1020,9 @@ class ShmemML2D {
                 ) {
             _M = M;
             _N = N;
+#ifdef ATOMICS_AS_MSGS
             atomics_cb = _atomics_cb;
+#endif
             int npes = shmem_n_pes();
             _rows_per_pe = (_M + npes - 1) / npes;
             id = id_counter++;
@@ -1008,6 +1063,8 @@ class ShmemML2D {
             _arrs = arrow::Table::Make(schema, columns, _rows_per_pe);
             _arrs->Validate();
             shmem_barrier_all();
+            add_array_to_namespace(id, this);
+            end_cmd();
         }
 
         ~ShmemML2D() {
@@ -1016,6 +1073,7 @@ class ShmemML2D {
 
             // Collective destruction
             shmem_barrier_all();
+            end_cmd();
         }
 
         int64_t N() { return _N; }
@@ -1089,6 +1147,11 @@ class ShmemML2D {
 
         unsigned get_id() { return id; }
 
+        void send_rand_2d_cmd() {
+            shmem_ml_rand_2d<double> cmd(id);
+            send_cmd(&cmd);
+        }
+
     private:
 
         inline double* get_column_array(int64_t col) {
@@ -1112,7 +1175,9 @@ class ShmemML2D {
         int64_t _rows_per_pe;
         unsigned id;
         ShmemMemoryPool* pool;
+#ifdef ATOMICS_AS_MSGS
         atomics_msg_2d_result_handler<double> atomics_cb;
+#endif
 };
 
 template <typename T>
@@ -1249,82 +1314,113 @@ void shmem_ml_finalize();
 unsigned long long shmem_ml_current_time_us();
 
 template <typename T>
-bool cmd_handler(shmem_ml_command cmd, void* _payload, size_t payload_size,
-        std::map<unsigned, void*>& arrs) {
-    bool done = false;
+shmem_ml_py_cmd cmd_handler(shmem_ml_command cmd, void* _payload,
+        size_t payload_size) {
+    shmem_ml_py_cmd optional_cmd;
+
     shmem_ml_cmd_payload<T> *payload = (shmem_ml_cmd_payload<T>*)_payload;
-    assert(payload_size == sizeof(*payload));
+    assert(payload_size >= sizeof(*payload));
 
     switch (cmd) {
         case (CREATE_1D): {
             ShmemML1D<T> *arr = new ShmemML1D<T>(payload->create_1d.N);
-            arrs.insert(std::pair<unsigned, void*>(arr->get_id(), arr));
+#ifdef VERBOSE_CMD
+            fprintf(stderr, "PE %d CREATE_1D id=%u\n", shmem_my_pe(), arr->get_id());
+#endif
             break;
         }
         case (DESTROY_1D): {
-            ShmemML1D<T>* arr = (ShmemML1D<T>*)arrs.at(payload->destroy_1d.id);
-            arrs.erase(arr->get_id());
+#ifdef VERBOSE_CMD
+            fprintf(stderr, "PE %d DESTROY_1D id=%u\n", shmem_my_pe(), payload->destroy_1d.id);
+#endif
+            ShmemML1D<T>* arr = (ShmemML1D<T>*)delete_array_in_namespace(payload->destroy_1d.id);
             delete arr;
             break;
         }
         case (CREATE_2D): {
             ShmemML2D *arr = new ShmemML2D(payload->create_2d.M,
                     payload->create_2d.N);
-            arrs.insert(std::pair<unsigned, void*>(arr->get_id(), arr));
+#ifdef VERBOSE_CMD
+            fprintf(stderr, "PE %d CREATE_2D id=%u\n", shmem_my_pe(), arr->get_id());
+#endif
             break;
         }
         case (DESTROY_2D): {
-            ShmemML2D* arr = (ShmemML2D*)arrs.at(payload->destroy_2d.id);
-            arrs.erase(arr->get_id());
+#ifdef VERBOSE_CMD
+            fprintf(stderr, "PE %d DESTROY_2D id=%u\n", shmem_my_pe(), payload->destroy_2d.id);
+#endif
+            ShmemML2D* arr = (ShmemML2D*)delete_array_in_namespace(payload->destroy_2d.id);
             delete arr;
             break;
         }
         case (CLEAR_1D): {
-            ShmemML1D<T>* arr = (ShmemML1D<T>*)arrs.at(payload->clear_1d.id);
+#ifdef VERBOSE_CMD
+            fprintf(stderr, "PE %d CLEAR_1D\n", shmem_my_pe());
+#endif
+            ShmemML1D<T>* arr = (ShmemML1D<T>*)lookup_array_in_namespace(payload->clear_1d.id);
             arr->clear(payload->clear_1d.val);
             break;
         }
+        case (SYNC_1D): {
+#ifdef VERBOSE_CMD
+            fprintf(stderr, "PE %d SYNC_1D\n", shmem_my_pe());
+#endif
+            ShmemML1D<T>* arr = (ShmemML1D<T>*)lookup_array_in_namespace(payload->sync_1d.id);
+            arr->sync();
+            break;
+        }
+        case (RAND_1D): {
+#ifdef VERBOSE_CMD
+            fprintf(stderr, "PE %d RAND_1D id=%u\n", shmem_my_pe(), payload->rand_1d.id);
+#endif
+            ShmemML1D<T>* arr = (ShmemML1D<T>*)lookup_array_in_namespace(payload->rand_1d.id);
+            optional_cmd = shmem_ml_py_cmd(RAND_1D, (void*)arr, NULL, 0);
+            break;
+        }
+        case (RAND_2D): {
+#ifdef VERBOSE_CMD
+            fprintf(stderr, "PE %d RAND_2D id=%u\n", shmem_my_pe(),
+                    payload->rand_2d.id);
+#endif
+            ShmemML2D* arr = (ShmemML2D*)lookup_array_in_namespace(payload->rand_2d.id);
+            optional_cmd = shmem_ml_py_cmd(RAND_2D, (void*)arr, NULL, 0);
+            break;
+        }
+        case (APPLY_1D): {
+#ifdef VERBOSE_CMD
+            fprintf(stderr, "PE %d APPLY_1D id=%u\n", shmem_my_pe(),
+                    payload->apply_1d.id);
+#endif
+            ShmemML1D<T>* arr = (ShmemML1D<T>*)lookup_array_in_namespace(payload->apply_1d.id);
+            size_t serialized_func_length = payload_size - sizeof(*payload);
+
+            char *serialized_func = (char *)malloc(serialized_func_length + 1);
+            assert(serialized_func);
+            memcpy(serialized_func, payload + 1, serialized_func_length);
+            serialized_func[serialized_func_length] = '\0';
+
+            optional_cmd = shmem_ml_py_cmd(APPLY_1D, (void*)arr,
+                    serialized_func, serialized_func_length);
+            break;
+        }
         case (CMD_DONE):
-            done = true;
+#ifdef VERBOSE_CMD
+            fprintf(stderr, "PE %d CMD_DONE\n", shmem_my_pe());
+#endif
+            optional_cmd = shmem_ml_py_cmd(CMD_DONE, NULL, NULL, 0);
             break;
         default:
+#ifdef VERBOSE_CMD
             fprintf(stderr, "ERROR: Unexpected command %d\n", cmd);
+#endif
             abort();
     }
-    return done;
+    return optional_cmd;
 }
 
-static inline void command_loop() {
-    std::map<unsigned, void*> arrs;
-
-    shmem_ml_cmd<uint8_t> *cmd = (shmem_ml_cmd<uint8_t>*)malloc(sizeof(*cmd));
-    assert(cmd);
-    size_t cmd_capacity = sizeof(*cmd);
-
-    bool done = false;
-    while (!done) {
-        int msg_len = mailbox_recv(cmd, cmd_capacity, &cmd_mailbox);
-        if (msg_len > 0) {
-            if (msg_len > cmd_capacity) {
-                /*
-                 * Not enough space in our cmd buffer to receive the current
-                 * message, realloc and loop again.
-                 */
-                cmd = (shmem_ml_cmd<uint8_t>*)realloc(cmd, msg_len);
-                assert(cmd);
-                cmd_capacity = msg_len;
-            } else {
-                done = cmd->handler(cmd->cmd, &cmd->payload,
-                        msg_len - offsetof(shmem_ml_cmd<uint8_t>, payload),
-                        arrs);
-            }
-        }
-    }
-
-    free(cmd);
-}
-
-
+/*
+ * For native C/C++ applications.
+ */
 template <typename lambda>
 static inline void shmem_ml_client_server_launch(lambda l) {
     if (getenv("SHMEM_ML_HANG_ABORT")) {
@@ -1346,6 +1442,41 @@ static inline void shmem_ml_client_server_launch(lambda l) {
 
         shmem_ml_cmd_done done_cmd;
         send_cmd(&done_cmd);
+        end_cmd();
+    }
+
+    mailbox_destroy(&cmd_mailbox);
+    this_pe_has_exited = 1;
+}
+
+/*
+ * For Python applications.
+ */
+static inline void py_shmem_ml_client_server_launch(const char *python_file) {
+    if (getenv("SHMEM_ML_HANG_ABORT")) {
+        pthread_t aborting_pthread;
+        const int pthread_err = pthread_create(&aborting_pthread, NULL,
+                aborting_thread, NULL);
+        assert(pthread_err == 0);
+    }
+
+    bool is_server = setup_client_server();
+
+    mailbox_init(&cmd_mailbox, 32 * 1024 * 1024);
+    cmd_msg = mailbox_allocate_msg(MAX_CMD_LEN, &cmd_ctx);
+
+    Py_Initialize();
+    if (is_server) {
+        PyRun_SimpleString("from PyShmemML import shmem_ml_command_loop; shmem_ml_command_loop();");
+        Py_Finalize();
+    } else {
+        FILE *fp = fopen(python_file, "r");
+        PyRun_SimpleFileExFlags(fp, python_file, 1, NULL);
+        Py_Finalize();
+
+        shmem_ml_cmd_done done_cmd;
+        send_cmd(&done_cmd);
+        end_cmd();
     }
 
     mailbox_destroy(&cmd_mailbox);

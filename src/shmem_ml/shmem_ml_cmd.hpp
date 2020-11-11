@@ -7,11 +7,16 @@
 
 #define MAX_CMD_LEN 2048
 
+class shmem_ml_py_cmd;
+
+extern int inside_cmd;
 extern mailbox_msg_header_t *cmd_msg;
 extern bool client_server_mode;
 extern bool is_server;
 extern shmem_ctx_t cmd_ctx;
 extern mailbox_t cmd_mailbox;
+
+void end_cmd();
 
 typedef enum {
     CREATE_1D,
@@ -19,27 +24,14 @@ typedef enum {
     CREATE_2D,
     DESTROY_2D,
     CLEAR_1D,
+    SYNC_1D,
+    GET_1D,
+    RAND_1D,
+    RAND_2D,
+    APPLY_1D,
     CMD_DONE,
     CMD_INVALID
 } shmem_ml_command;
-
-typedef bool (*cmd_handler_ptr)(shmem_ml_command, void*, size_t, std::map<unsigned, void*>&);
-
-template <typename T>
-cmd_handler_ptr get_typed_cmd_handler() {
-    return NULL;
-}
-
-/*
- * Needs to be declared here and implemented in shmem_ml.cpp for each type that
- * might be used from a Python program. Because the Python module consists of
- * its own .so (in addition to libshmem_ml.so), there are duplicate definitions
- * in the two .so files of everything in the header (including things like
- * cmd_handler<double>). This causes problems when PE 0 (which loads the Python
- * module's .so) sends the address of some cmd_handler<T> to the other PEs,
- * which haven't loaded the Python .so and its symbols.
- */
-template <> cmd_handler_ptr get_typed_cmd_handler<double>();
 
 template <typename T>
 union shmem_ml_cmd_payload {
@@ -59,16 +51,46 @@ union shmem_ml_cmd_payload {
         unsigned id;
         T val;
     } clear_1d;
+    struct {
+        unsigned id;
+    } sync_1d;
+    struct {
+        unsigned id;
+    } rand_1d;
+    struct {
+        unsigned id;
+    } rand_2d;
+    struct {
+        unsigned id;
+    } apply_1d;
 };
 
 template <typename T>
-bool cmd_handler(shmem_ml_command cmd, void* _payload, size_t payload_size,
-        std::map<unsigned, void*>& arrs);
+shmem_ml_py_cmd cmd_handler(shmem_ml_command cmd, void* _payload,
+        size_t payload_size);
+
+typedef shmem_ml_py_cmd (*cmd_handler_ptr)(shmem_ml_command, void*, size_t);
+
+template <typename T>
+cmd_handler_ptr get_typed_cmd_handler() {
+    return NULL;
+}
+
+/*
+ * Needs to be declared here and implemented in shmem_ml.cpp for each type that
+ * might be used from a Python program. Because the Python module consists of
+ * its own .so (in addition to libshmem_ml.so), there are duplicate definitions
+ * in the two .so files of everything in the header (including things like
+ * cmd_handler<double>). This causes problems when PE 0 (which loads the Python
+ * module's .so) sends the address of some cmd_handler<T> to the other PEs,
+ * which haven't loaded the Python .so and its symbols.
+ */
+template <> cmd_handler_ptr get_typed_cmd_handler<double>();
 
 template <typename T>
 struct shmem_ml_cmd {
     shmem_ml_command cmd;
-    bool (*handler)(shmem_ml_command, void*, size_t, std::map<unsigned, void*>&);
+    cmd_handler_ptr handler;
     shmem_ml_cmd_payload<T> payload;
 
     shmem_ml_cmd(shmem_ml_command _cmd) {
@@ -150,27 +172,59 @@ struct shmem_ml_clear_1d : public shmem_ml_cmd<T> {
     }
 };
 
+template <typename T>
+struct shmem_ml_sync_1d : public shmem_ml_cmd<T> {
+    shmem_ml_sync_1d(unsigned id) : shmem_ml_cmd<T>(SYNC_1D) {
+        this->payload.sync_1d.id = id;
+    }
+};
+
+template <typename T>
+struct shmem_ml_rand_1d : public shmem_ml_cmd<T> {
+    shmem_ml_rand_1d(unsigned id) : shmem_ml_cmd<T>(RAND_1D) {
+        this->payload.rand_1d.id = id;
+    }
+};
+
+template <typename T>
+struct shmem_ml_apply_1d : public shmem_ml_cmd<T> {
+    shmem_ml_apply_1d(unsigned id) : shmem_ml_cmd<T>(APPLY_1D) {
+        this->payload.apply_1d.id = id;
+    }
+};
+
+template <typename T>
+struct shmem_ml_rand_2d : public shmem_ml_cmd<T> {
+    shmem_ml_rand_2d(unsigned id) : shmem_ml_cmd<T>(RAND_2D) {
+        this->payload.rand_2d.id = id;
+    }
+};
+
 struct shmem_ml_cmd_done : public shmem_ml_cmd<uint32_t> {
     shmem_ml_cmd_done() : shmem_ml_cmd<uint32_t>(CMD_DONE) {
     }
 };
 
 template<typename T>
-static inline void send_cmd(shmem_ml_cmd<T>* cmd) {
-    if (client_server_mode && !is_server) {
-        assert(sizeof(*cmd) <= MAX_CMD_LEN);
+static inline void send_cmd(shmem_ml_cmd<T>* cmd, int _cmd_len = -1) {
+    inside_cmd++;
+    if (client_server_mode && !is_server && inside_cmd == 1) {
+        size_t cmd_len = sizeof(*cmd);
+        if (_cmd_len > 0) {
+            cmd_len = _cmd_len;
+        }
+        assert(cmd_len <= MAX_CMD_LEN);
 
-        memcpy(cmd_msg + 1, cmd, sizeof(*cmd));
+        memcpy(cmd_msg + 1, cmd, cmd_len);
 
         for (int p = 1; p < shmem_n_pes(); p++) {
             int success = 0;
             while (!success) {
-                success = mailbox_send(cmd_msg, cmd_ctx, sizeof(*cmd),
-                        p, -1, &cmd_mailbox);
+                success = mailbox_send(cmd_msg, cmd_ctx, cmd_len, p, -1,
+                        &cmd_mailbox);
             }
         }
     }
 }
-
 
 #endif

@@ -33,7 +33,7 @@ if pe() == 0:
 vec = rand(vec)
 mat = rand(mat)
 
-vec = vec.apply(lambda i, x: i / vec.N())
+vec = vec.apply(lambda i, x, vec: i / vec.N())
 mat = mat.apply(lambda i, j, x: i / mat.M())
 
 if pe() == 0:

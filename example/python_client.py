@@ -14,4 +14,19 @@ mat = PyShmemML2DD(nsamples, 5)
 
 vec.clear(0)
 
+vec.sync()
+
+value_at_zero = vec.get(0)
+assert value_at_zero == 0.
+vec.sync()
+
+print('PE=' + str(pe()) + ' N=' + str(vec.N()) + ' local slice start=' +
+        str(vec.local_slice_start()) + ' local slice end=' +
+        str(vec.local_slice_end()))
+
+vec = rand(vec)
+mat = rand(mat)
+
+vec = vec.apply(lambda i, x, vec: i / vec.N())
+
 print('Success')

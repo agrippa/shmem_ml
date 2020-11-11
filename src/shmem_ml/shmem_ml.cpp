@@ -7,12 +7,35 @@
 
 volatile int this_pe_has_exited = 0;
 
+int inside_cmd = 0;
 int id_counter = 0;
 bool client_server_mode = false;
 bool is_server = false;
 mailbox_t cmd_mailbox;
 mailbox_msg_header_t *cmd_msg;
 shmem_ctx_t cmd_ctx;
+
+static std::map<unsigned, void*> arrs;
+
+void add_array_to_namespace(unsigned id, void *arr) {
+#ifdef VERBOSE_CMD
+    fprintf(stderr, "PE %d add_array_to_namespace id=%u\n", shmem_my_pe(), id);
+#endif
+    arrs.insert(std::pair<unsigned, void*>(id, arr));
+}
+
+void* lookup_array_in_namespace(unsigned id) {
+    return arrs.at(id);
+}
+
+void* delete_array_in_namespace(unsigned id) {
+#ifdef VERBOSE_CMD
+    fprintf(stderr, "PE %d delete_array_in_namespace id=%u\n", shmem_my_pe(), id);
+#endif
+    void* arr = arrs.at(id);
+    arrs.erase(id);
+    return arr;
+}
 
 template <>
 cmd_handler_ptr get_typed_cmd_handler<double>() {
@@ -137,4 +160,37 @@ bool setup_client_server() {
     return is_server;
 }
 
+shmem_ml_py_cmd command_loop() {
+    shmem_ml_cmd<uint8_t> *cmd = (shmem_ml_cmd<uint8_t>*)malloc(sizeof(*cmd));
+    assert(cmd);
+    size_t cmd_capacity = sizeof(*cmd);
+
+    while (true) {
+        int msg_len = mailbox_recv(cmd, cmd_capacity, &cmd_mailbox);
+        if (msg_len > 0) {
+            if (msg_len > cmd_capacity) {
+                /*
+                 * Not enough space in our cmd buffer to receive the current
+                 * message, realloc and loop again.
+                 */
+                cmd = (shmem_ml_cmd<uint8_t>*)realloc(cmd, msg_len);
+                assert(cmd);
+                cmd_capacity = msg_len;
+            } else {
+                shmem_ml_py_cmd py_cmd = cmd->handler(cmd->cmd, &cmd->payload,
+                        msg_len - offsetof(shmem_ml_cmd<uint8_t>, payload));
+                if (py_cmd.get_cmd() != CMD_INVALID) {
+                    free(cmd);
+                    return py_cmd;
+                }
+            }
+        }
+    }
+
+    abort();
+}
+
+void end_cmd() {
+    inside_cmd--;
+}
 
