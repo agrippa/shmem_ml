@@ -8,7 +8,8 @@ import sklearn.linear_model
 # In client-server mode, only a single PE runs the program. It farms work out to the other PEs
 assert pe() == 0
 
-nsamples = 500000
+# nsamples = 500000
+nsamples = 5000000
 vec = PyShmemML1DD(nsamples)
 mat = PyShmemML2DD(nsamples, 5)
 
@@ -41,7 +42,7 @@ for i in range(mat.M()):
     for j in range(mat.N()):
         assert mat.get(i, j) == i / mat.M()
 
-niters = 10
+niters = 20
 clf = SGDRegressor(max_iter=niters)
 vec.sync()
 

@@ -9,7 +9,7 @@ import sklearn.linear_model
 shmem_ml_init()
 
 # Distributed, collective allocation of a 10-element array of float64
-nsamples = 500000
+nsamples = 5000000
 vec = PyShmemML1DD(nsamples)
 mat = PyShmemML2DD(nsamples, 5)
 
@@ -56,14 +56,15 @@ if pe() == 0:
         print('  ...')
     print('')
 
-niters = 10
+niters = 20
 clf = SGDRegressor(max_iter=niters)
 vec.sync()
 
 start_dist_fit = time.time()
 clf.fit(mat, vec)
-elapsed_dist_fit = time.time() - start_dist_fit
+start_dist_pred = time.time()
 pred = clf.predict(mat)
+end_dist_pred = time.time()
 
 if pe() == 0:
     print('PE=' + str(pe()) + ' sees predictions with N=' + str(pred.N()) + ', # iters=' + str(niters))
@@ -75,18 +76,24 @@ if pe() == 0:
 
     gathered_lbls = vec.gather()
     gathered_features = mat.gather()
+
     sk_model = sklearn.linear_model.SGDRegressor(max_iter=niters, tol=None)
     start_local_fit = time.time()
     sk_model.fit(gathered_features, gathered_lbls)
-    elapsed_local_fit = time.time() - start_local_fit
+    start_local_pred = time.time()
     sk_pred = sk_model.predict(gathered_features)
+    end_local_pred = time.time()
+
     print('Local predictions with sklearn and # iters=' + str(niters) + ':')
     for i in range(10 if pred.N() > 10 else pred.N()):
         print('  ' + str(sk_pred[i]))
     if pred.N() > 10:
         print('  ...')
-    print('PE ' + str(pe()) + '. Distributed training took ' + str(elapsed_dist_fit) + ' s')
-    print('PE ' + str(pe()) + '. Local training took ' + str(elapsed_local_fit) + ' s')
+    print('PE ' + str(pe()) + '. Distributed training took ' + str(start_dist_pred - start_dist_fit) + ' s')
+    print('PE ' + str(pe()) + '. Local training took ' + str(start_local_pred - start_local_fit) + ' s')
+    print('PE ' + str(pe()) + '. Distributed inference took ' + str(end_dist_pred - start_dist_pred) + ' s')
+    print('PE ' + str(pe()) + '. Local inference took ' + str(end_local_pred - start_local_pred) + ' s')
+    print('')
     print(sk_model.__dict__)
 
 pred.sync();
