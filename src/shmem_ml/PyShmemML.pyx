@@ -12,18 +12,24 @@ import sklearn
 import sklearn.linear_model
 from sklearn.linear_model import SGDRegressor as SK_SGDRegressor
 
+import tensorflow as tf
+from tensorflow import keras
+
 from shmem_ml cimport shmem_ml_init as c_shmem_ml_init
 from shmem_ml cimport shmem_ml_finalize as c_shmem_ml_finalize
 from shmem_ml cimport command_loop as c_command_loop
 from shmem_ml cimport shmem_my_pe as c_shmem_my_pe
 from shmem_ml cimport shmem_n_pes as c_shmem_n_pes
 from shmem_ml cimport end_cmd as c_end_cmd
+from shmem_ml cimport is_client_server_mode as c_is_client_server_mode
 from shmem_ml cimport send_sgd_fit_cmd as c_send_sgd_fit_cmd
 from shmem_ml cimport send_sgd_predict_cmd as c_send_sgd_predict_cmd
+from shmem_ml cimport send_sequential_fit_cmd as c_send_sequential_fit_cmd
+from shmem_ml cimport send_sequential_predict_cmd as c_send_sequential_predict_cmd
 
 from shmem_ml cimport ShmemML1D, ReplicatedShmemML1D, ShmemML2D, \
         shmem_ml_py_cmd, CMD_DONE, RAND_1D, RAND_2D, APPLY_1D, APPLY_2D, \
-        SGD_FIT, SGD_PREDICT
+        SGD_FIT, SGD_PREDICT, SEQUENTIAL_FIT, SEQUENTIAL_PREDICT
 
 
 def shmem_ml_finalize():
@@ -338,8 +344,13 @@ class SGDRegressor:
         assert isinstance(x, PyShmemML2DD)
         assert isinstance(y, PyShmemML1DD)
 
-        serialized = dill.dumps(self)
-        c_send_sgd_fit_cmd(x.get_id(), y.get_id(), serialized, len(serialized))
+        if is_client_server_mode():
+            serialized = None
+            serialized_len = None
+            # Optimization, so we aren't serializing if we don't have to
+            serialized = dill.dumps(self)
+            serialized_len = len(serialized)
+            c_send_sgd_fit_cmd(x.get_id(), y.get_id(), serialized, serialized_len)
 
         x_arr = x.get_local_arrow_table()
         x_arr = x_arr.to_pandas(zero_copy_only=True, split_blocks=True)
@@ -348,7 +359,7 @@ class SGDRegressor:
         y_arr = y_arr.to_numpy(zero_copy_only=True)
 
         # Initialize coefficients and intercepts on all ranks to the same seed
-        self.model.fit(x_arr, y_arr);
+        self.model.fit(x_arr, y_arr)
         coef, intercept = self._copy_coef_intercept()
         arrow_coef = pyarrow.array(coef)
         arrow_intercept = pyarrow.array(intercept)
@@ -389,7 +400,8 @@ class SGDRegressor:
             self._update_coef_intercept(prev_coef, prev_intercept,
                     all_coef_grads, all_intercept_grads)
 
-        c_end_cmd()
+        if is_client_server_mode():
+            c_end_cmd()
 
 
     def predict(self, x):
@@ -408,12 +420,134 @@ class SGDRegressor:
         return dist_pred
 
 
+class Sequential:
+    def __init__(self, layers=None, name=None):
+        self.model = keras.Sequential(layers=layers, name=name)
+
+    def _copy_layer_weights(self):
+        nweights = 0
+        for layer in self.model.layers:
+            for weights in layer.get_weights():
+                nweights += weights.size
+
+        save_weights = np.zeros(nweights)
+        nweights = 0
+        for layer in self.model.layers:
+            for weights in layer.get_weights():
+                save_weights[nweights:nweights + weights.size] = weights.flatten()
+                nweights += weights.size
+
+        return save_weights
+
+
+    def _compute_layer_weight_grad(self, prev_weights, after_weights):
+        return after_weights - prev_weights
+
+
+    def _update_layer_weights(self, prev_weights, grad_weights):
+        nweights = 0
+        for layer in self.model.layers:
+            packed_weights = []
+            for weights in layer.get_weights():
+                new_weights = prev_weights[nweights:nweights + weights.size] + \
+                        grad_weights[nweights:nweights + weights.size]
+                packed_weights.append(new_weights.reshape(weights.shape))
+                nweights += weights.size
+            layer.set_weights(tuple(packed_weights))
+
+
+    def _fit_one_epoch(self, x_arr, y_arr, batch_size):
+        for batch_offset in range(0, x_arr.shape[0], batch_size):
+            self.model.train_on_batch(x_arr.values[batch_offset:batch_offset + batch_size], y_arr[batch_offset:batch_offset + batch_size])
+
+
+    def fit(self, x=None, y=None, batch_size=32, epochs=1):
+        assert isinstance(x, PyShmemML2DD)
+        assert isinstance(y, PyShmemML1DD)
+
+        if is_client_server_mode():
+            # Optimization, so we aren't serializing if we don't have to
+            serialized = dill.dumps(self)
+            serialized_len = len(serialized)
+            c_send_sequential_fit_cmd(x.get_id(), y.get_id(), serialized, serialized_len)
+
+        x_arr = x.get_local_arrow_table().to_pandas(zero_copy_only=True, split_blocks=True)
+        y_arr = y.get_local_arrow_array().to_numpy(zero_copy_only=True)
+
+        self._fit_one_epoch(x_arr, y_arr, batch_size)
+        weights = self._copy_layer_weights()
+        arrow_weights = pyarrow.array(weights)
+        dist_weights_grad = PyReplicatedShmemML1DD(len(arrow_weights))
+        dist_weights_grad.update_from_arrow(arrow_weights)
+        dist_weights_grad.bcast(0)
+        set_weights = dist_weights_grad.get_local_arrow_array().to_numpy(zero_copy_only=True)
+        self._update_layer_weights(set_weights, np.zeros(len(set_weights)))
+
+        for it in range(1, epochs):
+            prev_weights = self._copy_layer_weights()
+
+            self._fit_one_epoch(x_arr, y_arr, batch_size)
+
+            after_weights = self._copy_layer_weights()
+            weights_grad = self._compute_layer_weight_grad(prev_weights, after_weights)
+            weights_grad = weights_grad / npes()
+            arrow_weights_grad = pyarrow.array(weights_grad)
+
+            # Perform a global sum of coef_grad and intercept_grad over SHMEM,
+            # then add to prev_coef and prev_intercept and reset coef and
+            # intercept in the model to the value
+            dist_weights_grad.update_from_arrow(arrow_weights_grad)
+            dist_weights_grad.reduce_all_sum()
+
+            all_weights_grads = dist_weights_grad.get_local_arrow_array().to_numpy(zero_copy_only=True)
+            self._update_layer_weights(prev_weights, all_weights_grads)
+
+        if is_client_server_mode():
+            c_end_cmd()
+
+
+    def predict(self, x):
+        assert isinstance(x, PyShmemML2DD)
+
+        if is_client_server_mode():
+            # Optimization, so we aren't serializing if we don't have to
+            serialized = dill.dumps(self)
+            serialized_len = len(serialized)
+            c_send_sequential_predict_cmd(x.get_id(), serialized, len(serialized))
+
+        x_arr = x.get_local_arrow_table().to_pandas(zero_copy_only=True, split_blocks=True)
+
+        pred = self.model.predict(x_arr.values)
+
+        dist_pred = PyShmemML2DD(x.M(), pred.shape[1])
+        dist_pred.update_from_arrow(pyarrow.table(pd.DataFrame(pred)))
+        if is_client_server_mode():
+            c_end_cmd()
+        return dist_pred
+
+    def evaluate(x=None, y=None):
+        raise Exception('unsupported')
+
+    def train_on_batch(x, y=None):
+        raise Exception('unsupported')
+
+    def __getattr__(self, name):
+        if callable(getattr(keras.Sequential, name)):
+            def method(*args, **kwargs):
+                class_method = getattr(keras.Sequential, name)
+                return class_method(self.model, *args, **kwargs)
+            return method
+        else:
+            return getattr(self.model, name)
+
 def pe():
     return c_shmem_my_pe()
 
-
 def npes():
     return c_shmem_n_pes()
+
+def is_client_server_mode():
+    return c_is_client_server_mode()
 
 # Initialize the runtime when it is imported
 shmem_ml_init()

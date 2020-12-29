@@ -45,6 +45,12 @@ void send_sgd_fit_cmd(unsigned x_id, unsigned y_id, char *serialized_model,
 void send_sgd_predict_cmd(unsigned x_id, char *serialized_model,
         int serialized_model_length);
 
+void send_sequential_fit_cmd(unsigned x_id, unsigned y_id, char *serialized_model,
+        int serialized_model_length);
+
+void send_sequential_predict_cmd(unsigned x_id, char *serialized_model,
+        int serialized_model_length);
+
 template <typename T>
 class ShmemML1D;
 
@@ -1141,19 +1147,28 @@ class ShmemML2D {
                 std::shared_ptr<arrow::Array> src_arr = src->column(c)->chunk(0);
                 assert(src_arr->length() == dst_arr->length());
 
-                std::shared_ptr<arrow::NumericArray<arrow::DoubleType>> src_prim_arr =
-                    std::dynamic_pointer_cast<arrow::NumericArray<arrow::DoubleType>, arrow::Array>(src_arr);
-                assert(src_prim_arr);
-
                 std::shared_ptr<arrow::NumericArray<arrow::DoubleType>> dst_prim_arr =
                     std::dynamic_pointer_cast<arrow::NumericArray<arrow::DoubleType>, arrow::Array>(dst_arr);
                 assert(dst_prim_arr);
-
-                double* src_symm = (double*)src_prim_arr->values()->data();
                 double* dst_symm = (double*)dst_prim_arr->values()->data();
 
-                for (int i = 0; i < src_arr->length(); i++) {
-                    dst_symm[i] = src_symm[i];
+                std::shared_ptr<arrow::NumericArray<arrow::DoubleType>> dbl_src_prim_arr =
+                    std::dynamic_pointer_cast<arrow::NumericArray<arrow::DoubleType>, arrow::Array>(src_arr);
+                std::shared_ptr<arrow::NumericArray<arrow::FloatType>> flt_src_prim_arr =
+                    std::dynamic_pointer_cast<arrow::NumericArray<arrow::FloatType>, arrow::Array>(src_arr);
+
+                if (dbl_src_prim_arr) {
+                    double* src_symm = (double*)dbl_src_prim_arr->values()->data();
+                    for (int i = 0; i < src_arr->length(); i++) {
+                        dst_symm[i] = src_symm[i];
+                    }
+                } else if (flt_src_prim_arr) {
+                    float* src_symm = (float*)flt_src_prim_arr->values()->data();
+                    for (int i = 0; i < src_arr->length(); i++) {
+                        dst_symm[i] = src_symm[i];
+                    }
+                } else {
+                    abort();
                 }
             }
         }
@@ -1334,6 +1349,7 @@ void ReplicatedShmemML1D<double>::bcast(int src_rank);
 
 void shmem_ml_init();
 void shmem_ml_finalize();
+bool is_client_server_mode();
 
 unsigned long long shmem_ml_current_time_us();
 

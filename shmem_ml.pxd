@@ -13,9 +13,12 @@ cdef extern from "stdint.h":
 cdef extern from "shmem_ml.hpp":
     cpdef void shmem_ml_init()
     cpdef void shmem_ml_finalize()
+    cpdef bool is_client_server_mode()
     cpdef void end_cmd()
     cpdef void send_sgd_fit_cmd(unsigned x_id, unsigned y_id, char* s, int s_length)
     cpdef void send_sgd_predict_cmd(unsigned x_id, char* s, int s_length)
+    cpdef void send_sequential_fit_cmd(unsigned x_id, unsigned y_id, char* s, int s_length)
+    cpdef void send_sequential_predict_cmd(unsigned x_id, char* s, int s_length)
 
     cdef cppclass shmem_ml_command:
         pass
@@ -36,6 +39,8 @@ cdef extern from "shmem_ml.hpp":
     cdef shmem_ml_command SGD_PREDICT
     cdef shmem_ml_command CMD_DONE
     cdef shmem_ml_command CMD_INVALID
+    cdef shmem_ml_command SEQUENTIAL_FIT
+    cdef shmem_ml_command SEQUENTIAL_PREDICT
 
     cdef cppclass ShmemML1D[T]:
         ShmemML1D(int64_t) except +

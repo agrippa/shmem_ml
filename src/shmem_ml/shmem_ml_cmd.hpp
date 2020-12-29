@@ -3,6 +3,7 @@
 
 #include "mailbox.hpp"
 
+#include <cassert>
 #include <map>
 
 #define MAX_CMD_LEN 2048
@@ -33,6 +34,8 @@ typedef enum {
     APPLY_2D,
     SGD_FIT,
     SGD_PREDICT,
+    SEQUENTIAL_FIT,
+    SEQUENTIAL_PREDICT,
     CMD_DONE,
     CMD_INVALID
 } shmem_ml_command;
@@ -80,6 +83,13 @@ union shmem_ml_cmd_payload {
     struct {
         unsigned x_id;
     } sgd_predict;
+    struct {
+        unsigned x_id;
+        unsigned y_id;
+    } sequential_fit;
+    struct {
+        unsigned x_id;
+    } sequential_predict;
 };
 
 template <typename T>
@@ -243,6 +253,20 @@ struct shmem_ml_sgd_predict : public shmem_ml_cmd<double> {
         this->payload.sgd_predict.x_id = _x_id;
     }
 };
+
+struct shmem_ml_sequential_fit : public shmem_ml_cmd<double> {
+    shmem_ml_sequential_fit(unsigned _x_id, unsigned _y_id) : shmem_ml_cmd<double>(SEQUENTIAL_FIT) {
+        this->payload.sequential_fit.x_id = _x_id;
+        this->payload.sequential_fit.y_id = _y_id;
+    }
+};
+
+struct shmem_ml_sequential_predict : public shmem_ml_cmd<double> {
+    shmem_ml_sequential_predict(unsigned _x_id) : shmem_ml_cmd<double>(SEQUENTIAL_PREDICT) {
+        this->payload.sequential_predict.x_id = _x_id;
+    }
+};
+
 
 struct shmem_ml_cmd_done : public shmem_ml_cmd<uint32_t> {
     shmem_ml_cmd_done() : shmem_ml_cmd<uint32_t>(CMD_DONE) {
