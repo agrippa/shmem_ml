@@ -358,6 +358,36 @@ def rand(vec):
     else:
         assert False, str(type(vec))
 
+def _training_driver(model, x_arr, y_arr, epochs, **custom_args):
+        model._fit_one_epoch(x_arr, y_arr, **custom_args)
+        weights = model._copy_weights()
+        arrow_weights = pyarrow.array(weights)
+        dist_weights_grad = PyReplicatedShmemML1DD(len(arrow_weights))
+        dist_weights_grad.update_from_arrow(arrow_weights)
+        dist_weights_grad.bcast(0)
+        set_weights = dist_weights_grad.get_local_arrow_array().to_numpy(zero_copy_only=True)
+        model._update_weights(set_weights, np.zeros(len(set_weights)))
+
+        for it in range(1, epochs):
+            prev_weights = model._copy_weights()
+
+            model._fit_one_epoch(x_arr, y_arr, **custom_args)
+
+            after_weights = model._copy_weights()
+            weights_grad = model._compute_grad(prev_weights, after_weights)
+            weights_grad = weights_grad
+            arrow_weights_grad = pyarrow.array(weights_grad)
+
+            # Perform a global sum of coef_grad and intercept_grad over SHMEM,
+            # then add to prev_coef and prev_intercept and reset coef and
+            # intercept in the model to the value
+            dist_weights_grad.update_from_arrow(arrow_weights_grad)
+            dist_weights_grad.reduce_all_sum()
+
+            all_weights_grads = dist_weights_grad.get_local_arrow_array().to_numpy(zero_copy_only=True)
+            all_weights_grads = all_weights_grads / npes()
+            model._update_weights(prev_weights, all_weights_grads)
+
 
 class SGDRegressor:
     def __init__(self, max_iter=1, random_state=32):
@@ -365,31 +395,21 @@ class SGDRegressor:
                 random_state=random_state, learning_rate='constant')
         self.max_iter = max_iter
 
-    def _copy_coef_intercept(self):
-        save_coef = np.zeros(len(self.model.coef_))
-        save_intercept = np.zeros(len(self.model.intercept_))
-        for i in range(len(self.model.coef_)):
-            save_coef[i] = self.model.coef_[i]
-        for i in range(len(self.model.intercept_)):
-            save_intercept[i] = self.model.intercept_[i]
-        return save_coef, save_intercept
+    def _copy_weights(self):
+        save_weights = np.zeros(len(self.model.coef_) + len(self.model.intercept_))
+        save_weights[0:len(self.model.coef_)] = self.model.coef_
+        save_weights[len(self.model.coef_):] = self.model.intercept_
+        return save_weights
 
-    def _compute_coef_intercept_grad(self, prev_coef, prev_intercept, after_coef, after_intercept):
-        coef_grad = np.zeros(len(prev_coef))
-        intercept_grad = np.zeros(len(prev_intercept))
+    def _compute_grad(self, prev_weights, after_weights):
+        return after_weights - prev_weights
 
-        for i in range(len(prev_coef)):
-            coef_grad[i] = after_coef[i] - prev_coef[i]
-        for i in range(len(prev_intercept)):
-            intercept_grad[i] = after_intercept[i] - prev_intercept[i]
+    def _update_weights(self, prev_weights, grad_weights):
+        self.model.coef_ = prev_weights[0:len(self.model.coef_)] + grad_weights[0:len(self.model.coef_)]
+        self.model.intercept_ = prev_weights[len(self.model.coef_):] + grad_weights[len(self.model.coef_):]
 
-        return coef_grad, intercept_grad
-
-    def _update_coef_intercept(self, prev_coef, prev_intercept, grad_coef, grad_intercept):
-        for i in range(len(self.model.coef_)):
-            self.model.coef_[i] = prev_coef[i] + grad_coef[i]
-        for i in range(len(self.model.intercept_)):
-            self.model.intercept_[i] = prev_intercept[i] + grad_intercept[i]
+    def _fit_one_epoch(self, x_arr, y_arr):
+        self.model.partial_fit(x_arr, y_arr)
 
     def fit(self, x, y):
         assert isinstance(x, PyShmemML2DD)
@@ -409,47 +429,7 @@ class SGDRegressor:
         y_arr = y.get_local_arrow_array()
         y_arr = y_arr.to_numpy(zero_copy_only=True)
 
-        # Initialize coefficients and intercepts on all ranks to the same seed
-        self.model.fit(x_arr, y_arr)
-        coef, intercept = self._copy_coef_intercept()
-        arrow_coef = pyarrow.array(coef)
-        arrow_intercept = pyarrow.array(intercept)
-        dist_coef_grad = PyReplicatedShmemML1DD(len(arrow_coef))
-        dist_intercept_grad = PyReplicatedShmemML1DD(len(arrow_intercept))
-        dist_coef_grad.update_from_arrow(arrow_coef)
-        dist_intercept_grad.update_from_arrow(arrow_intercept)
-        dist_coef_grad.bcast(0)
-        dist_intercept_grad.bcast(0)
-        set_coef = dist_coef_grad.get_local_arrow_array().to_numpy(zero_copy_only=True)
-        set_intercept = dist_intercept_grad.get_local_arrow_array().to_numpy(zero_copy_only=True)
-        self._update_coef_intercept(set_coef, set_intercept, [0.0] * len(set_coef), [0.0] * len(set_intercept))
-
-        for it in range(1, self.max_iter):
-            prev_coef, prev_intercept = self._copy_coef_intercept()
-
-            self.model.partial_fit(x_arr, y_arr)
-
-            after_coef, after_intercept = self._copy_coef_intercept()
-            coef_grad, intercept_grad = self._compute_coef_intercept_grad(
-                    prev_coef, prev_intercept, after_coef, after_intercept)
-            coef_grad = coef_grad / npes()
-            intercept_grad = intercept_grad / npes()
-
-            arrow_coef_grad = pyarrow.array(coef_grad)
-            arrow_intercept_grad = pyarrow.array(intercept_grad)
-
-            # Perform a global sum of coef_grad and intercept_grad over SHMEM,
-            # then add to prev_coef and prev_intercept and reset coef and
-            # intercept in the model to the value
-            dist_coef_grad.update_from_arrow(arrow_coef_grad)
-            dist_intercept_grad.update_from_arrow(arrow_intercept_grad)
-            dist_coef_grad.reduce_all_sum()
-            dist_intercept_grad.reduce_all_sum()
-
-            all_coef_grads = dist_coef_grad.get_local_arrow_array().to_numpy(zero_copy_only=True)
-            all_intercept_grads = dist_intercept_grad.get_local_arrow_array().to_numpy(zero_copy_only=True)
-            self._update_coef_intercept(prev_coef, prev_intercept,
-                    all_coef_grads, all_intercept_grads)
+        _training_driver(self, x_arr, y_arr, self.max_iter)
 
         if is_client_server_mode():
             c_end_cmd()
@@ -476,7 +456,7 @@ class Sequential:
         self.model = keras.Sequential(layers=layers, name=name)
         self.compile_config = None
 
-    def _copy_layer_weights(self):
+    def _copy_weights(self):
         nweights = 0
         for layer in self.model.layers:
             for weights in layer.get_weights():
@@ -492,11 +472,11 @@ class Sequential:
         return save_weights
 
 
-    def _compute_layer_weight_grad(self, prev_weights, after_weights):
+    def _compute_grad(self, prev_weights, after_weights):
         return after_weights - prev_weights
 
 
-    def _update_layer_weights(self, prev_weights, grad_weights):
+    def _update_weights(self, prev_weights, grad_weights):
         nweights = 0
         for layer in self.model.layers:
             packed_weights = []
@@ -508,7 +488,7 @@ class Sequential:
             layer.set_weights(tuple(packed_weights))
 
 
-    def _fit_one_epoch(self, x_arr, y_arr, batch_size):
+    def _fit_one_epoch(self, x_arr, y_arr, batch_size=32):
         for batch_offset in range(0, x_arr.shape[0], batch_size):
             self.model.train_on_batch(x_arr.values[batch_offset:batch_offset + batch_size],
                     y_arr[batch_offset:batch_offset + batch_size])
@@ -532,34 +512,7 @@ class Sequential:
         x_arr = x.get_local_arrow_table().to_pandas(zero_copy_only=True, split_blocks=True)
         y_arr = y.get_local_arrow_array().to_numpy(zero_copy_only=True)
 
-        # self._fit_one_epoch(x_arr, y_arr, batch_size)
-        weights = self._copy_layer_weights()
-        arrow_weights = pyarrow.array(weights)
-        dist_weights_grad = PyReplicatedShmemML1DD(len(arrow_weights))
-        # dist_weights_grad.update_from_arrow(arrow_weights)
-        # dist_weights_grad.bcast(0)
-        # set_weights = dist_weights_grad.get_local_arrow_array().to_numpy(zero_copy_only=True)
-        # self._update_layer_weights(set_weights, np.zeros(len(set_weights)))
-
-        for it in range(0, epochs):
-            prev_weights = self._copy_layer_weights()
-
-            self._fit_one_epoch(x_arr, y_arr, batch_size)
-
-            after_weights = self._copy_layer_weights()
-            weights_grad = self._compute_layer_weight_grad(prev_weights, after_weights)
-            weights_grad = weights_grad
-            arrow_weights_grad = pyarrow.array(weights_grad)
-
-            # Perform a global sum of coef_grad and intercept_grad over SHMEM,
-            # then add to prev_coef and prev_intercept and reset coef and
-            # intercept in the model to the value
-            dist_weights_grad.update_from_arrow(arrow_weights_grad)
-            dist_weights_grad.reduce_all_sum()
-
-            all_weights_grads = dist_weights_grad.get_local_arrow_array().to_numpy(zero_copy_only=True)
-            all_weights_grads = all_weights_grads / npes()
-            self._update_layer_weights(prev_weights, all_weights_grads)
+        _training_driver(self, x_arr, y_arr, epochs, batch_size=batch_size)
 
         if is_client_server_mode():
             c_end_cmd()

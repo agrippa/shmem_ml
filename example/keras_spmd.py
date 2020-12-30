@@ -59,7 +59,7 @@ if pe() == 0:
         print('  ...')
     print('')
 
-niters = 3
+niters = 1000
 clf = Sequential()
 clf.add(tensorflow.keras.Input(shape=(5,)))
 #clf.add(tensorflow.keras.layers.Dense(3, activation='relu',
@@ -90,37 +90,37 @@ if pe() == 0:
     print('')
     print(clf.model.__dict__)
 
-    gathered_lbls = vec.gather()
-    gathered_features = mat.gather()
-
-    keras_model = keras.Sequential()
-    keras_model.add(tensorflow.keras.Input(shape=(5,)))
-    #keras_model.add(tensorflow.keras.layers.Dense(3, activation='relu',
-    #    kernel_initializer='zeros', bias_initializer='zeros'))
-    keras_model.add(tensorflow.keras.layers.Dense(1, activation='relu',
-        kernel_initializer=tensorflow.keras.initializers.GlorotNormal(seed=42),
-        bias_initializer=tensorflow.keras.initializers.GlorotNormal(seed=43)))
-    # opt = keras.optimizers.Adam(learning_rate=0.01)
-    opt = keras.optimizers.SGD(learning_rate=0.01)
-    keras_model.compile(optimizer=opt, loss='mse')
-
-    start_local_fit = time.time()
-    keras_model.fit(gathered_features, gathered_lbls, epochs=niters, verbose=0)
-    start_local_pred = time.time()
-    keras_pred = keras_model.predict(gathered_features)
-    end_local_pred = time.time()
-
-    print('Local predictions with keras and # iters=' + str(niters) + ':')
-    for i in range(max_print_lines if pred.M() > max_print_lines else pred.M()):
-        print('  ' + str(keras_pred[i, 0]))
-    if pred.M() > max_print_lines:
-        print('  ...')
-    print('PE ' + str(pe()) + '. Distributed training took ' + str(start_dist_pred - start_dist_fit) + ' s')
-    print('PE ' + str(pe()) + '. Local training took ' + str(start_local_pred - start_local_fit) + ' s')
-    print('PE ' + str(pe()) + '. Distributed inference took ' + str(end_dist_pred - start_dist_pred) + ' s')
-    print('PE ' + str(pe()) + '. Local inference took ' + str(end_local_pred - start_local_pred) + ' s')
-    print('')
-    #print(keras_model.__dict__)
+#     gathered_lbls = vec.gather()
+#     gathered_features = mat.gather()
+# 
+#     keras_model = keras.Sequential()
+#     keras_model.add(tensorflow.keras.Input(shape=(5,)))
+#     #keras_model.add(tensorflow.keras.layers.Dense(3, activation='relu',
+#     #    kernel_initializer='zeros', bias_initializer='zeros'))
+#     keras_model.add(tensorflow.keras.layers.Dense(1, activation='relu',
+#         kernel_initializer=tensorflow.keras.initializers.GlorotNormal(seed=42),
+#         bias_initializer=tensorflow.keras.initializers.GlorotNormal(seed=43)))
+#     # opt = keras.optimizers.Adam(learning_rate=0.01)
+#     opt = keras.optimizers.SGD(learning_rate=0.01)
+#     keras_model.compile(optimizer=opt, loss='mse')
+# 
+#     start_local_fit = time.time()
+#     keras_model.fit(gathered_features, gathered_lbls, epochs=niters, verbose=0)
+#     start_local_pred = time.time()
+#     keras_pred = keras_model.predict(gathered_features)
+#     end_local_pred = time.time()
+# 
+#     print('Local predictions with keras and # iters=' + str(niters) + ':')
+#     for i in range(max_print_lines if pred.M() > max_print_lines else pred.M()):
+#         print('  ' + str(keras_pred[i, 0]))
+#     if pred.M() > max_print_lines:
+#         print('  ...')
+#     print('PE ' + str(pe()) + '. Distributed training took ' + str(start_dist_pred - start_dist_fit) + ' s')
+#     print('PE ' + str(pe()) + '. Local training took ' + str(start_local_pred - start_local_fit) + ' s')
+#     print('PE ' + str(pe()) + '. Distributed inference took ' + str(end_dist_pred - start_dist_pred) + ' s')
+#     print('PE ' + str(pe()) + '. Local inference took ' + str(end_local_pred - start_local_pred) + ' s')
+#     print('')
+#     #print(keras_model.__dict__)
 
 #pred.sync();
 vec.sync();
