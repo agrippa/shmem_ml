@@ -37,10 +37,10 @@ cdef extern from "shmem_ml.hpp":
     cdef shmem_ml_command APPLY_2D
     cdef shmem_ml_command SGD_FIT
     cdef shmem_ml_command SGD_PREDICT
-    cdef shmem_ml_command CMD_DONE
-    cdef shmem_ml_command CMD_INVALID
     cdef shmem_ml_command SEQUENTIAL_FIT
     cdef shmem_ml_command SEQUENTIAL_PREDICT
+    cdef shmem_ml_command CMD_DONE
+    cdef shmem_ml_command CMD_INVALID
 
     cdef cppclass ShmemML1D[T]:
         ShmemML1D(int64_t) except +

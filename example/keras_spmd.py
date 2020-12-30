@@ -10,7 +10,8 @@ from tensorflow import keras
 shmem_ml_init()
 
 # Distributed, collective allocation of a 10-element array of float64
-nsamples = 5000000
+# nsamples = 5000000
+nsamples = 500000
 vec = PyShmemML1DD(nsamples)
 mat = PyShmemML2DD(nsamples, 5)
 
@@ -37,7 +38,7 @@ mat = rand(mat)
 vec = vec.apply(lambda i, x, vec: i / vec.N())
 mat = mat.apply(lambda i, j, x, mat: i / mat.M())
 
-max_print_lines = 100
+max_print_lines = 20
 if pe() == 0:
     print('Labels:')
     for i in range(max_print_lines if vec.N() > max_print_lines else vec.N()):
@@ -58,7 +59,7 @@ if pe() == 0:
         print('  ...')
     print('')
 
-niters = 2
+niters = 3
 clf = Sequential()
 clf.add(tensorflow.keras.Input(shape=(5,)))
 #clf.add(tensorflow.keras.layers.Dense(3, activation='relu',
@@ -66,7 +67,9 @@ clf.add(tensorflow.keras.Input(shape=(5,)))
 clf.add(tensorflow.keras.layers.Dense(1, activation='relu',
     kernel_initializer=tensorflow.keras.initializers.GlorotNormal(seed=42),
     bias_initializer=tensorflow.keras.initializers.GlorotNormal(seed=43)))
-clf.compile(optimizer='sgd', loss='mse')
+# opt = keras.optimizers.Adam(learning_rate=0.001)
+opt = keras.optimizers.SGD(learning_rate=0.01)
+clf.compile(optimizer=opt, loss='mse')
 vec.sync()
 
 start_dist_fit = time.time()
@@ -74,15 +77,18 @@ clf.fit(mat, vec, epochs=niters)
 start_dist_pred = time.time()
 pred = clf.predict(mat)
 end_dist_pred = time.time()
+pred.sync()
 
 if pe() == 0:
-    print('PE=' + str(pe()) + ' sees predictions with N=' + str(pred.N()) + ', # iters=' + str(niters))
+    print('PE=' + str(pe()) + ' sees predictions with M=' + str(pred.M()) + ', # iters=' + str(niters))
     for i in range(max_print_lines if pred.M() > max_print_lines else pred.M()):
         print('  ' + str(pred.get(i, 0)))
     if pred.M() > max_print_lines:
         print('  ...')
+    for i in range(pred.M() - max_print_lines if pred.M() - max_print_lines >= 0 else 0, pred.M()):
+        print('  ' + str(pred.get(i, 0)))
     print('')
-    #print(clf.model.__dict__)
+    print(clf.model.__dict__)
 
     gathered_lbls = vec.gather()
     gathered_features = mat.gather()
@@ -94,7 +100,9 @@ if pe() == 0:
     keras_model.add(tensorflow.keras.layers.Dense(1, activation='relu',
         kernel_initializer=tensorflow.keras.initializers.GlorotNormal(seed=42),
         bias_initializer=tensorflow.keras.initializers.GlorotNormal(seed=43)))
-    keras_model.compile(optimizer='sgd', loss='mse')
+    # opt = keras.optimizers.Adam(learning_rate=0.01)
+    opt = keras.optimizers.SGD(learning_rate=0.01)
+    keras_model.compile(optimizer=opt, loss='mse')
 
     start_local_fit = time.time()
     keras_model.fit(gathered_features, gathered_lbls, epochs=niters, verbose=0)

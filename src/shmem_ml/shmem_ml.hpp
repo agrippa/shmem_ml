@@ -1508,7 +1508,46 @@ shmem_ml_py_cmd cmd_handler(shmem_ml_command cmd, void* _payload,
                     serialized_model, serialized_model_length, NULL);
             break;
         }
+        case (SEQUENTIAL_FIT): {
+#ifdef VERBOSE_CMD
+            fprintf(stderr, "PE %d SEQUENTIAL_FIT x_id=%u y_id=%u\n", shmem_my_pe(),
+                    payload->sequential_fit.x_id, payload->sequential_fit.y_id);
+#endif
+            unsigned x_id = payload->sequential_fit.x_id;
+            unsigned y_id = payload->sequential_fit.y_id;
+            ShmemML2D* x_arr = (ShmemML2D*)lookup_array_in_namespace(x_id);
+            ShmemML1D<double>* y_arr = (ShmemML1D<double>*)lookup_array_in_namespace(y_id);
 
+            size_t serialized_model_length = payload_size - sizeof(*payload);
+
+            char *serialized_model = (char *)malloc(serialized_model_length + 1);
+            assert(serialized_model);
+            memcpy(serialized_model, payload + 1, serialized_model_length);
+            serialized_model[serialized_model_length] = '\0';
+
+            optional_cmd = shmem_ml_py_cmd(SEQUENTIAL_FIT, (void*)x_arr,
+                    serialized_model, serialized_model_length, (void*)y_arr);
+            break;
+        }
+        case (SEQUENTIAL_PREDICT): {
+#ifdef VERBOSE_CMD
+            fprintf(stderr, "PE %d SEQUENTIAL_PREDICT x_id=%u\n", shmem_my_pe(),
+                    payload->sequential_predict.x_id);
+#endif
+            unsigned x_id = payload->sequential_predict.x_id;
+            ShmemML2D* x_arr = (ShmemML2D*)lookup_array_in_namespace(x_id);
+
+            size_t serialized_model_length = payload_size - sizeof(*payload);
+
+            char *serialized_model = (char *)malloc(serialized_model_length + 1);
+            assert(serialized_model);
+            memcpy(serialized_model, payload + 1, serialized_model_length);
+            serialized_model[serialized_model_length] = '\0';
+
+            optional_cmd = shmem_ml_py_cmd(SEQUENTIAL_PREDICT, (void*)x_arr,
+                    serialized_model, serialized_model_length, NULL);
+            break;
+        }
         case (CMD_DONE):
 #ifdef VERBOSE_CMD
             fprintf(stderr, "PE %d CMD_DONE\n", shmem_my_pe());

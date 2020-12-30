@@ -6,7 +6,7 @@
 #include <cassert>
 #include <map>
 
-#define MAX_CMD_LEN 2048
+#define MAX_CMD_LEN 3096
 
 class shmem_ml_py_cmd;
 
@@ -20,22 +20,22 @@ extern mailbox_t cmd_mailbox;
 void end_cmd();
 
 typedef enum {
-    CREATE_1D,
-    DESTROY_1D,
-    CREATE_2D,
-    DESTROY_2D,
-    CLEAR_1D,
-    SYNC_1D,
-    SYNC_2D,
-    GET_1D,
-    RAND_1D,
-    RAND_2D,
-    APPLY_1D,
-    APPLY_2D,
-    SGD_FIT,
-    SGD_PREDICT,
-    SEQUENTIAL_FIT,
-    SEQUENTIAL_PREDICT,
+    CREATE_1D = 0,
+    DESTROY_1D = 1,
+    CREATE_2D = 2,
+    DESTROY_2D = 3,
+    CLEAR_1D = 4,
+    SYNC_1D = 5,
+    SYNC_2D = 6,
+    GET_1D = 7,
+    RAND_1D = 8,
+    RAND_2D = 9,
+    APPLY_1D = 10,
+    APPLY_2D = 11,
+    SGD_FIT = 12,
+    SGD_PREDICT = 13,
+    SEQUENTIAL_FIT = 14,
+    SEQUENTIAL_PREDICT = 15,
     CMD_DONE,
     CMD_INVALID
 } shmem_ml_command;

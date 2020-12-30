@@ -10,7 +10,7 @@ tests: bin/save_load_get_set bin/shmem_ml_1d bin/shmem_replicated_1d bin/shmem_m
 
 libs: bin/libshmem_ml.so
 
-python: libs
+python: libs bin/shmem_ml_client_server
 	python setup.py build_ext --inplace --force
 
 bin/libshmem_ml.so: bin/dlmalloc.o bin/shmem_ml.o bin/ShmemMemoryPool.o bin/mailbox.o bin/mailbox_buffer.o

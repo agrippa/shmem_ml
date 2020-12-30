@@ -6,6 +6,7 @@ from pyarrow.lib cimport *
 import sys
 import dill
 import atexit
+import pickle
 import numpy as np
 import pandas as pd
 import sklearn
@@ -280,6 +281,56 @@ def shmem_ml_command_loop():
             m = dill.loads(py_s)
 
             m.predict(wrapped_mat)
+        elif <int>py_cmd.get_cmd() == <int>SEQUENTIAL_FIT:
+            c_mat = <ShmemML2D*>py_cmd.get_arr()
+            c_vec = <ShmemML1D[double]*>py_cmd.get_arr_2()
+
+            wrapped_mat = PyShmemML2DD(0, 0)
+            wrapped_mat.c_mat = c_mat
+
+            wrapped_vec = PyShmemML1DD(0)
+            wrapped_vec.c_vec = c_vec
+
+            s = py_cmd.get_str()
+            l = py_cmd.get_str_length()
+            py_s = s[:l]
+
+            fit_config = dill.loads(py_s)
+            assert 'config' in fit_config and 'weights' in fit_config and 'compile_config' in fit_config
+            assert fit_config['compile_config'] is not None
+            new_model = keras.Sequential.from_config(fit_config['config'])
+            new_model.set_weights(fit_config['weights'])
+            new_model.compile(**fit_config['compile_config'])
+            del fit_config['config']
+            del fit_config['weights']
+            del fit_config['compile_config']
+
+            m = Sequential()
+            m.model = new_model
+            m.fit(wrapped_mat, wrapped_vec, **fit_config)
+        elif <int>py_cmd.get_cmd() == <int>SEQUENTIAL_PREDICT:
+            c_mat = <ShmemML2D*>py_cmd.get_arr()
+
+            wrapped_mat = PyShmemML2DD(0, 0)
+            wrapped_mat.c_mat = c_mat
+
+            s = py_cmd.get_str()
+            l = py_cmd.get_str_length()
+            py_s = s[:l]
+
+            fit_config = dill.loads(py_s)
+            assert 'config' in fit_config and 'weights' in fit_config and 'compile_config' in fit_config
+            assert fit_config['compile_config'] is not None
+            new_model = keras.Sequential.from_config(fit_config['config'])
+            new_model.set_weights(fit_config['weights'])
+            new_model.compile(**fit_config['compile_config'])
+            del fit_config['config']
+            del fit_config['weights']
+            del fit_config['compile_config']
+
+            m = Sequential()
+            m.model = new_model
+            m.predict(wrapped_mat, **fit_config)
         else:
             raise Exception('Unexpected command ' + str(<int>py_cmd.get_cmd()))
 
@@ -423,6 +474,7 @@ class SGDRegressor:
 class Sequential:
     def __init__(self, layers=None, name=None):
         self.model = keras.Sequential(layers=layers, name=name)
+        self.compile_config = None
 
     def _copy_layer_weights(self):
         nweights = 0
@@ -458,7 +510,8 @@ class Sequential:
 
     def _fit_one_epoch(self, x_arr, y_arr, batch_size):
         for batch_offset in range(0, x_arr.shape[0], batch_size):
-            self.model.train_on_batch(x_arr.values[batch_offset:batch_offset + batch_size], y_arr[batch_offset:batch_offset + batch_size])
+            self.model.train_on_batch(x_arr.values[batch_offset:batch_offset + batch_size],
+                    y_arr[batch_offset:batch_offset + batch_size])
 
 
     def fit(self, x=None, y=None, batch_size=32, epochs=1):
@@ -467,30 +520,35 @@ class Sequential:
 
         if is_client_server_mode():
             # Optimization, so we aren't serializing if we don't have to
-            serialized = dill.dumps(self)
+            serialized = {'config': self.model.get_config(),
+                          'weights': self.model.get_weights(),
+                          'batch_size': batch_size,
+                          'epochs': epochs,
+                          'compile_config': self.compile_config}
+            serialized = dill.dumps(serialized)
             serialized_len = len(serialized)
             c_send_sequential_fit_cmd(x.get_id(), y.get_id(), serialized, serialized_len)
 
         x_arr = x.get_local_arrow_table().to_pandas(zero_copy_only=True, split_blocks=True)
         y_arr = y.get_local_arrow_array().to_numpy(zero_copy_only=True)
 
-        self._fit_one_epoch(x_arr, y_arr, batch_size)
+        # self._fit_one_epoch(x_arr, y_arr, batch_size)
         weights = self._copy_layer_weights()
         arrow_weights = pyarrow.array(weights)
         dist_weights_grad = PyReplicatedShmemML1DD(len(arrow_weights))
-        dist_weights_grad.update_from_arrow(arrow_weights)
-        dist_weights_grad.bcast(0)
-        set_weights = dist_weights_grad.get_local_arrow_array().to_numpy(zero_copy_only=True)
-        self._update_layer_weights(set_weights, np.zeros(len(set_weights)))
+        # dist_weights_grad.update_from_arrow(arrow_weights)
+        # dist_weights_grad.bcast(0)
+        # set_weights = dist_weights_grad.get_local_arrow_array().to_numpy(zero_copy_only=True)
+        # self._update_layer_weights(set_weights, np.zeros(len(set_weights)))
 
-        for it in range(1, epochs):
+        for it in range(0, epochs):
             prev_weights = self._copy_layer_weights()
 
             self._fit_one_epoch(x_arr, y_arr, batch_size)
 
             after_weights = self._copy_layer_weights()
             weights_grad = self._compute_layer_weight_grad(prev_weights, after_weights)
-            weights_grad = weights_grad / npes()
+            weights_grad = weights_grad
             arrow_weights_grad = pyarrow.array(weights_grad)
 
             # Perform a global sum of coef_grad and intercept_grad over SHMEM,
@@ -500,6 +558,7 @@ class Sequential:
             dist_weights_grad.reduce_all_sum()
 
             all_weights_grads = dist_weights_grad.get_local_arrow_array().to_numpy(zero_copy_only=True)
+            all_weights_grads = all_weights_grads / npes()
             self._update_layer_weights(prev_weights, all_weights_grads)
 
         if is_client_server_mode():
@@ -511,7 +570,10 @@ class Sequential:
 
         if is_client_server_mode():
             # Optimization, so we aren't serializing if we don't have to
-            serialized = dill.dumps(self)
+            serialized = {'config': self.model.get_config(),
+                          'weights': self.model.get_weights(),
+                          'compile_config': self.compile_config}
+            serialized = dill.dumps(serialized)
             serialized_len = len(serialized)
             c_send_sequential_predict_cmd(x.get_id(), serialized, len(serialized))
 
@@ -521,9 +583,16 @@ class Sequential:
 
         dist_pred = PyShmemML2DD(x.M(), pred.shape[1])
         dist_pred.update_from_arrow(pyarrow.table(pd.DataFrame(pred)))
+
         if is_client_server_mode():
             c_end_cmd()
+
         return dist_pred
+
+    def compile(self, optimizer='rmsprop', loss=None):
+        self.compile_config = {'optimizer': optimizer,
+                               'loss': loss}
+        self.model.compile(optimizer=optimizer, loss=loss)
 
     def evaluate(x=None, y=None):
         raise Exception('unsupported')

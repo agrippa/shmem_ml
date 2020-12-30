@@ -38,10 +38,12 @@ cd $SCRATCH/job.$SLURM_JOB_ID
 export SLURM_ARGS="--ntasks=$(($SLURM_NNODES * $CORES_PER_NODE)) --ntasks-per-socket=$CORES_PER_SOCKET --cpus-per-task=1"
 
 echo
+# export SHMEM_ML_HANG_ABORT=120
+# export SHMEM_ML_HANG_ABORT_PE=1
 
 # 0 = all messages are logged (default behavior)
 # 1 = INFO messages are not printed
 # 2 = INFO and WARNING messages are not printed
 # 3 = INFO, WARNING, and ERROR messages are not printed
 export TF_CPP_MIN_LOG_LEVEL=3
-oshrun -N 56 python $HOME/shmem_ml/example/keras_spmd.py
+oshrun -N 56 $HOME/shmem_ml/bin/shmem_ml_client_server $HOME/shmem_ml/example/keras_client.py
