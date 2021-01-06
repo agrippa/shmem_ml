@@ -416,9 +416,6 @@ class SGDRegressor:
         assert isinstance(y, PyShmemML1DD)
 
         if is_client_server_mode():
-            serialized = None
-            serialized_len = None
-            # Optimization, so we aren't serializing if we don't have to
             serialized = dill.dumps(self)
             serialized_len = len(serialized)
             c_send_sgd_fit_cmd(x.get_id(), y.get_id(), serialized, serialized_len)
@@ -499,7 +496,6 @@ class Sequential:
         assert isinstance(y, PyShmemML1DD)
 
         if is_client_server_mode():
-            # Optimization, so we aren't serializing if we don't have to
             serialized = {'config': self.model.get_config(),
                           'weights': self.model.get_weights(),
                           'batch_size': batch_size,
