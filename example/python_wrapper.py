@@ -56,7 +56,7 @@ if pe() == 0:
         print('  ...')
     print('')
 
-niters = 20
+niters = 1
 clf = SGDRegressor(max_iter=niters)
 vec.sync()
 
@@ -73,6 +73,7 @@ if pe() == 0:
     if pred.N() > 10:
         print('  ...')
     print('')
+    print(clf.model.__dict__)
 
     gathered_lbls = vec.gather()
     gathered_features = mat.gather()
