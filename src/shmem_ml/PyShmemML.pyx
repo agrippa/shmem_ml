@@ -358,58 +358,23 @@ def rand(vec):
     else:
         assert False, str(type(vec))
 
-def _training_driver(model, x_arr, y_arr, epochs, has_init_weights,
-        **custom_args):
-        dist_weights_grad = None
-        start_epoch = 0
+def _training_driver(model, x_arr, y_arr, epochs, **custom_args):
+    dist_weights_grad = None
 
-        if epochs < 1:
-            return
+    for it in range(epochs):
 
-        if not has_init_weights:
-            # This type of model does not have a way to pre-initialize weights
-            # before first call to _fit_one_epoch, so we have to run one local
-            # epoch to initialize weights, broadcast them to give everyone the
-            # same starting point, and then continue training.
+        model._fit_one_epoch(x_arr, y_arr, **custom_args)
 
-            model._fit_one_epoch(x_arr, y_arr, **custom_args)
-            weights = model._copy_weights()
-            arrow_weights = pyarrow.array(weights)
+        after_weights = model._copy_weights()
+        arrow_weights = pyarrow.array(after_weights)
+        if dist_weights_grad is None:
             dist_weights_grad = PyReplicatedShmemML1DD(len(arrow_weights))
-            dist_weights_grad.update_from_arrow(arrow_weights)
-            dist_weights_grad.reduce_all_sum()
-            set_weights = np.divide(dist_weights_grad.get_local_arrow_array().to_numpy(zero_copy_only=True), npes())
+        dist_weights_grad.update_from_arrow(arrow_weights)
+        dist_weights_grad.reduce_all_sum()
 
-            model._update_weights(set_weights, np.zeros(len(set_weights)))
-            start_epoch = 1
-
-        for it in range(start_epoch, epochs):
-            prev_weights = model._copy_weights()
-            if dist_weights_grad is None:
-                dist_weights_grad = PyReplicatedShmemML1DD(len(prev_weights))
-
-            model._fit_one_epoch(x_arr, y_arr, **custom_args)
-
-            after_weights = model._copy_weights()
-            arrow_weights = pyarrow.array(after_weights)
-            dist_weights_grad.update_from_arrow(arrow_weights)
-            dist_weights_grad.reduce_all_sum()
-
-            # after_weights = model._copy_weights()
-            # weights_grad = model._compute_grad(prev_weights, after_weights)
-            # weights_grad = weights_grad
-            # arrow_weights_grad = pyarrow.array(weights_grad)
-
-            # # Perform a global sum of coef_grad and intercept_grad over SHMEM,
-            # # then add to prev_coef and prev_intercept and reset coef and
-            # # intercept in the model to the value
-            # dist_weights_grad.update_from_arrow(arrow_weights_grad)
-            # dist_weights_grad.reduce_all_sum()
-
-            all_weights_grads = dist_weights_grad.get_local_arrow_array().to_numpy(zero_copy_only=True)
-            all_weights_grads = all_weights_grads / npes()
-            # model._update_weights(prev_weights, all_weights_grads)
-            model._update_weights(all_weights_grads, np.zeros(len(all_weights_grads)))
+        all_weights_grads = dist_weights_grad.get_local_arrow_array().to_numpy(zero_copy_only=True)
+        all_weights_grads = all_weights_grads / npes()
+        model._update_weights(all_weights_grads)
 
 
 class SGDRegressor:
@@ -427,9 +392,9 @@ class SGDRegressor:
     def _compute_grad(self, prev_weights, after_weights):
         return after_weights - prev_weights
 
-    def _update_weights(self, prev_weights, grad_weights):
-        self.model.coef_ = prev_weights[0:len(self.model.coef_)] + grad_weights[0:len(self.model.coef_)]
-        self.model.intercept_ = prev_weights[len(self.model.coef_):] + grad_weights[len(self.model.coef_):]
+    def _update_weights(self, new_weights):
+        self.model.coef_ = new_weights[0:len(self.model.coef_)]
+        self.model.intercept_ = new_weights[len(self.model.coef_):]
 
     def _fit_one_epoch(self, x_arr, y_arr):
         self.model.partial_fit(x_arr, y_arr)
@@ -449,7 +414,7 @@ class SGDRegressor:
         y_arr = y.get_local_arrow_array()
         y_arr = y_arr.to_numpy(zero_copy_only=True)
 
-        _training_driver(self, x_arr, y_arr, self.max_iter, False)
+        _training_driver(self, x_arr, y_arr, self.max_iter)
 
         if is_client_server_mode():
             c_end_cmd()
@@ -496,13 +461,12 @@ class Sequential:
         return after_weights - prev_weights
 
 
-    def _update_weights(self, prev_weights, grad_weights):
+    def _update_weights(self, updated_weights):
         nweights = 0
         for layer in self.model.layers:
             packed_weights = []
             for weights in layer.get_weights():
-                new_weights = prev_weights[nweights:nweights + weights.size] + \
-                        grad_weights[nweights:nweights + weights.size]
+                new_weights = updated_weights[nweights:nweights + weights.size]
                 packed_weights.append(new_weights.reshape(weights.shape))
                 nweights += weights.size
             layer.set_weights(tuple(packed_weights))
@@ -531,7 +495,7 @@ class Sequential:
         x_arr = x.get_local_arrow_table().to_pandas(zero_copy_only=True, split_blocks=True)
         y_arr = y.get_local_arrow_array().to_numpy(zero_copy_only=True)
 
-        _training_driver(self, x_arr, y_arr, epochs, True, batch_size=batch_size)
+        _training_driver(self, x_arr, y_arr, epochs, batch_size=batch_size)
 
         if is_client_server_mode():
             c_end_cmd()
