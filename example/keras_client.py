@@ -54,7 +54,8 @@ clf.add(tensorflow.keras.Input(shape=(5,)))
 #    kernel_initializer='zeros', bias_initializer='zeros'))
 clf.add(tensorflow.keras.layers.Dense(1, activation='relu',
     kernel_initializer=tensorflow.keras.initializers.GlorotNormal(seed=42),
-    bias_initializer=tensorflow.keras.initializers.GlorotNormal(seed=43)))
+    bias_initializer=tensorflow.keras.initializers.GlorotNormal(seed=43),
+    dtype='float64'))
 opt = keras.optimizers.SGD(learning_rate=0.01)
 clf.compile(optimizer=opt, loss='mse')
 vec.sync()
@@ -87,7 +88,8 @@ keras_model.add(tensorflow.keras.Input(shape=(5,)))
 #    kernel_initializer='zeros', bias_initializer='zeros'))
 keras_model.add(tensorflow.keras.layers.Dense(1, activation='relu',
     kernel_initializer=tensorflow.keras.initializers.GlorotNormal(seed=42),
-    bias_initializer=tensorflow.keras.initializers.GlorotNormal(seed=43)))
+    bias_initializer=tensorflow.keras.initializers.GlorotNormal(seed=43),
+    dtype='float64'))
 opt = keras.optimizers.SGD(learning_rate=0.01)
 keras_model.compile(optimizer=opt, loss='mse')
 

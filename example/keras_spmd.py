@@ -11,7 +11,7 @@ shmem_ml_init()
 
 # Distributed, collective allocation of a 10-element array of float64
 # nsamples = 5000000
-nsamples = 500000
+nsamples = 5000000
 nfeatures = 5
 vec = PyShmemML1DD(nsamples)
 mat = PyShmemML2DD(nsamples, nfeatures)
@@ -62,7 +62,7 @@ if pe() == 0:
 
 np.random.seed(2)
 tensorflow.random.set_seed(33)
-local_niters = 30
+local_niters = 40
 dist_niters = local_niters * 10
 clf = Sequential()
 clf.add(tensorflow.keras.Input(shape=(nfeatures,)))
@@ -71,19 +71,24 @@ clf.add(tensorflow.keras.Input(shape=(nfeatures,)))
 #     bias_initializer=tensorflow.keras.initializers.GlorotNormal(seed=400)))
 clf.add(tensorflow.keras.layers.Dense(1, activation='relu',
     kernel_initializer=tensorflow.keras.initializers.GlorotNormal(seed=42),
-    bias_initializer=tensorflow.keras.initializers.GlorotNormal(seed=43)))
-opt = keras.optimizers.SGD(learning_rate=0.01)
+    bias_initializer=tensorflow.keras.initializers.GlorotNormal(seed=43),
+    dtype='float64'))
+opt = keras.optimizers.SGD(learning_rate=0.005)
 clf.compile(optimizer=opt, loss='mse')
 vec.sync()
 
 start_dist_fit = time.time()
-clf.fit(mat, vec, epochs=dist_niters)
+clf.fit(mat, vec, epochs=dist_niters, batch_size=32)
 start_dist_pred = time.time()
 pred = clf.predict(mat)
 end_dist_pred = time.time()
 pred.sync()
+mse = vec.mse(pred)
 
 if pe() == 0:
+    print('PE ' + str(pe()) + '. Distributed training took ' + str(start_dist_pred - start_dist_fit) + ' s')
+    print('PE ' + str(pe()) + '. Distributed inference took ' + str(end_dist_pred - start_dist_pred) + ' s')
+    print('Distributed MSE = ' + str(mse))
     print('PE=' + str(pe()) + ' sees predictions with M=' + str(pred.M()) + ', # iters=' + str(dist_niters))
     for i in range(max_print_lines if pred.M() > max_print_lines else pred.M()):
         print('  ' + str(pred.get(i, 0)))
@@ -108,12 +113,13 @@ if pe() == 0:
     #     bias_initializer=tensorflow.keras.initializers.GlorotNormal(seed=400)))
     keras_model.add(tensorflow.keras.layers.Dense(1, activation='relu',
         kernel_initializer=tensorflow.keras.initializers.GlorotNormal(seed=42),
-        bias_initializer=tensorflow.keras.initializers.GlorotNormal(seed=43)))
+        bias_initializer=tensorflow.keras.initializers.GlorotNormal(seed=43),
+        dtype='float64'))
     opt = keras.optimizers.SGD(learning_rate=0.01)
     keras_model.compile(optimizer=opt, loss='mse')
 
     start_local_fit = time.time()
-    keras_model.fit(gathered_features, gathered_lbls, epochs=local_niters, verbose=0,
+    keras_model.fit(gathered_features, gathered_lbls, epochs=local_niters, verbose=1,
             shuffle=False, batch_size=32)
     start_local_pred = time.time()
     keras_pred = keras_model.predict(gathered_features)

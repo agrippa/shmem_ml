@@ -47,12 +47,14 @@ def shmem_ml_init():
 
 cdef class PyShmemML1DD:
     cdef ShmemML1D[double]* c_vec
+    cdef public (int64_t,) shape
 
     def __cinit__(self, int64_t N):
         if N == 0:
             self.c_vec = NULL
         else:
             self.c_vec = new ShmemML1D[double](N)
+        self.shape = (N,)
 
     def __dealloc__(self):
         # The challenge with automatically de-allocating the underlying C data
@@ -119,14 +121,38 @@ cdef class PyShmemML1DD:
     def get_id(self):
         return self.c_vec.get_id()
 
+    def mse(self, other):
+        assert isinstance(other, PyShmemML1DD) or \
+                (isinstance(other, PyShmemML2DD) and other.shape[1] == 1), str(type(other), other.shape)
+        local_self = self.get_local_arrow_array().to_numpy(zero_copy_only=True,
+                writable=False)
+        if isinstance(other, PyShmemML1DD):
+            local_other = other.get_local_arrow_array().to_numpy(
+                    zero_copy_only=True, writable=False)
+        else:
+            local_other = other.get_local_arrow_table().column(0).to_numpy()
+
+        local_mse = tf.compat.v1.losses.mean_squared_error(local_self,
+                local_other)
+
+        global_mse = PyReplicatedShmemML1DD(1)
+        np_arr = np.zeros(1)
+        np_arr[0] = local_mse
+        global_mse.update_from_arrow(pyarrow.array(np_arr))
+        global_mse.reduce_all_sum()
+        return global_mse.get(0).as_py() / float(npes())
+
+
 cdef class PyShmemML2DD:
     cdef ShmemML2D* c_mat
+    cdef public (int64_t, int64_t) shape
 
     def __cinit__(self, int64_t M, int64_t N):
         if M == 0 and N == 0:
             self.c_mat = NULL
         else:
             self.c_mat = new ShmemML2D(M, N)
+        self.shape = (M, N)
 
     def __dealloc__(self):
         pass
@@ -208,6 +234,10 @@ cdef class PyReplicatedShmemML1DD:
 
     def bcast(self, src_rank):
         self.c_vec.bcast(src_rank)
+
+    def get(self, local_index):
+        return self.get_local_arrow_array()[local_index]
+
 
 def shmem_ml_command_loop():
     cdef ShmemML1D[double]* c_vec

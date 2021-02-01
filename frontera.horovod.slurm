@@ -44,4 +44,8 @@ echo
 # 2 = INFO and WARNING messages are not printed
 # 3 = INFO, WARNING, and ERROR messages are not printed
 export TF_CPP_MIN_LOG_LEVEL=3
-oshrun -N 56 python $HOME/shmem_ml/example/keras_spmd.py
+# oshrun -N 56 python $HOME/shmem_ml/example/keras_horovod.py
+# horovodrun -np $(($SLURM_NNODES * $CORES_PER_NODE)) python $HOME/shmem_ml/example/keras_horovod.py
+
+export IBRUN_TASKS_PER_NODE=56
+ibrun python $HOME/shmem_ml/example/keras_horovod.py

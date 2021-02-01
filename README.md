@@ -20,6 +20,33 @@ On Cori:
     export ARROW_HOME=$HOME/.conda/envs/pyarrow-dev/
     export PYTHONPATH=$HOME/shmem_ml/src:$PYTHONPATH
 
+On Frontera:
+
+    module unload pmix
+    module load gcc/9.1.0
+
+    export SHMEM_HOME=$HOME/osss-ucx/osss-ucx-install
+    export OPENSHMEM_HOME=$SHMEM_HOME
+    export PRRTE_HOME=$HOME/osss-ucx/prrte-install
+    export OPENPMIX_HOME=$HOME/osss-ucx/openpmix-install
+
+    export PATH=$SHMEM_HOME/bin:$PATH
+    export PATH=$PRRTE_HOME/bin:$PATH
+    export LD_LIBRARY_PATH=$SHMEM_HOME/lib:$LD_LIBRARY_PATH
+    export LD_LIBRARY_PATH=$ARROW_HOME/lib:$LD_LIBRARY_PATH
+    export LD_LIBRARY_PATH=$OPENPMIX_HOME/lib:$LD_LIBRARY_PATH
+    export LD_LIBRARY_PATH=$HOME/shmem_ml/src:$LD_LIBRARY_PATH
+    export LD_LIBRARY_PATH=$HOME/shmem_ml/bin:$LD_LIBRARY_PATH
+
+    conda activate pyarrow-dev
+    export ARROW_HOME=$HOME/miniconda3/envs/pyarrow-dev
+    export PYTHONPATH=$HOME/shmem_ml:$PYTHONPATH
+    export PYTHONPATH=$HOME/shmem_ml/src:$PYTHONPATH
+    export PYTHONPATH=$HOME/arrow/arrow-src/python:$PYTHONPATH
+
+    export SHMEM_ML_HOME=$HOME/shmem_ml
+
+
 ## Dependencies:
 
 - Apache Arrow C++ and Python APIs
