@@ -1,10 +1,10 @@
 #!/bin/bash -l
 
 #SBATCH -J SHMEM_ML           # Job name
-#SBATCH -p development        # Queue (partition) name
-#SBATCH -N 32               # Total # of nodes (must be 1 for serial)
+#SBATCH -p normal        # Queue (partition) name
+#SBATCH -N 1               # Total # of nodes (must be 1 for serial)
 #SBATCH --ntasks-per-node=56
-#SBATCH -t 00:30:00        # Run time (hh:mm:ss)
+#SBATCH -t 02:00:00        # Run time (hh:mm:ss)
 #SBATCH --mail-type=all    # Send email at begin and end of job
 #SBATCH --mail-user=max.grossman@gatech.edu
 #SBATCH --exclusive

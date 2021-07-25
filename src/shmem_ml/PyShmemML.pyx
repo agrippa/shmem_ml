@@ -4,6 +4,7 @@ import pyarrow
 from pyarrow.lib cimport *
 
 import sys
+import math
 import dill
 import atexit
 import pickle
@@ -388,23 +389,23 @@ def rand(vec):
     else:
         assert False, str(type(vec))
 
-def _training_driver(model, x_arr, y_arr, epochs, **custom_args):
+def _training_driver(model, x_arr, y_arr, epochs, batches_per_epoch, **custom_args):
     dist_weights_grad = None
 
     for it in range(epochs):
+        for batch_num in range(batches_per_epoch):
+            model._fit_one_batch(x_arr, y_arr, it, batch_num, **custom_args)
 
-        model._fit_one_epoch(x_arr, y_arr, **custom_args)
+            after_weights = model._copy_weights()
+            arrow_weights = pyarrow.array(after_weights)
+            if dist_weights_grad is None:
+                dist_weights_grad = PyReplicatedShmemML1DD(len(arrow_weights))
+            dist_weights_grad.update_from_arrow(arrow_weights)
+            dist_weights_grad.reduce_all_sum()
 
-        after_weights = model._copy_weights()
-        arrow_weights = pyarrow.array(after_weights)
-        if dist_weights_grad is None:
-            dist_weights_grad = PyReplicatedShmemML1DD(len(arrow_weights))
-        dist_weights_grad.update_from_arrow(arrow_weights)
-        dist_weights_grad.reduce_all_sum()
-
-        all_weights_grads = dist_weights_grad.get_local_arrow_array().to_numpy(zero_copy_only=True)
-        all_weights_grads = all_weights_grads / npes()
-        model._update_weights(all_weights_grads)
+            all_weights_grads = dist_weights_grad.get_local_arrow_array().to_numpy(zero_copy_only=True)
+            all_weights_grads = all_weights_grads / npes()
+            model._update_weights(all_weights_grads)
 
 
 class SGDRegressor:
@@ -426,7 +427,7 @@ class SGDRegressor:
         self.model.coef_ = new_weights[0:len(self.model.coef_)]
         self.model.intercept_ = new_weights[len(self.model.coef_):]
 
-    def _fit_one_epoch(self, x_arr, y_arr):
+    def _fit_one_batch(self, x_arr, y_arr, epoch, batch):
         self.model.partial_fit(x_arr, y_arr)
 
     def fit(self, x, y):
@@ -444,7 +445,7 @@ class SGDRegressor:
         y_arr = y.get_local_arrow_array()
         y_arr = y_arr.to_numpy(zero_copy_only=True)
 
-        _training_driver(self, x_arr, y_arr, self.max_iter)
+        _training_driver(self, x_arr, y_arr, self.max_iter, 1)
 
         if is_client_server_mode():
             c_end_cmd()
@@ -502,10 +503,10 @@ class Sequential:
             layer.set_weights(tuple(packed_weights))
 
 
-    def _fit_one_epoch(self, x_arr, y_arr, batch_size=32):
-        for batch_offset in range(0, x_arr.shape[0], batch_size):
-            self.model.train_on_batch(x_arr.values[batch_offset:batch_offset + batch_size],
-                    y_arr[batch_offset:batch_offset + batch_size])
+    def _fit_one_batch(self, x_arr, y_arr, epoch, batch, batch_size=32):
+        batch_offset = batch * batch_size
+        self.model.train_on_batch(x_arr.values[batch_offset:batch_offset + batch_size],
+                y_arr[batch_offset:batch_offset + batch_size])
 
 
     def fit(self, x=None, y=None, batch_size=32, epochs=1):
@@ -525,7 +526,8 @@ class Sequential:
         x_arr = x.get_local_arrow_table().to_pandas(zero_copy_only=True, split_blocks=True)
         y_arr = y.get_local_arrow_array().to_numpy(zero_copy_only=True)
 
-        _training_driver(self, x_arr, y_arr, epochs, batch_size=batch_size)
+        _training_driver(self, x_arr, y_arr, epochs, math.ceil(x_arr.shape[0] / batch_size),
+                batch_size=batch_size)
 
         if is_client_server_mode():
             c_end_cmd()

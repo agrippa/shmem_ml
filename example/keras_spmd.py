@@ -9,6 +9,10 @@ from tensorflow import keras
 # Set up runtime
 shmem_ml_init()
 
+nthreads = 2
+tensorflow.config.threading.set_inter_op_parallelism_threads(nthreads)
+tensorflow.config.threading.set_intra_op_parallelism_threads(nthreads)
+
 # Distributed, collective allocation of a 10-element array of float64
 # nsamples = 5000000
 nsamples = 5000000
@@ -60,46 +64,46 @@ if pe() == 0:
         print('  ...')
     print('')
 
-np.random.seed(2)
-tensorflow.random.set_seed(33)
+# np.random.seed(2)
+# tensorflow.random.set_seed(33)
 local_niters = 40
 dist_niters = local_niters * 10
-clf = Sequential()
-clf.add(tensorflow.keras.Input(shape=(nfeatures,)))
-# clf.add(tensorflow.keras.layers.Dense(2, activation='relu',
-#     kernel_initializer=tensorflow.keras.initializers.GlorotNormal(seed=40),
-#     bias_initializer=tensorflow.keras.initializers.GlorotNormal(seed=400)))
-clf.add(tensorflow.keras.layers.Dense(1, activation='relu',
-    kernel_initializer=tensorflow.keras.initializers.GlorotNormal(seed=42),
-    bias_initializer=tensorflow.keras.initializers.GlorotNormal(seed=43),
-    dtype='float64'))
-opt = keras.optimizers.SGD(learning_rate=0.005)
-clf.compile(optimizer=opt, loss='mse')
-vec.sync()
-
-start_dist_fit = time.time()
-clf.fit(mat, vec, epochs=dist_niters, batch_size=32)
-start_dist_pred = time.time()
-pred = clf.predict(mat)
-end_dist_pred = time.time()
-pred.sync()
-mse = vec.mse(pred)
+# clf = Sequential()
+# clf.add(tensorflow.keras.Input(shape=(nfeatures,)))
+# # clf.add(tensorflow.keras.layers.Dense(2, activation='relu',
+# #     kernel_initializer=tensorflow.keras.initializers.GlorotNormal(seed=40),
+# #     bias_initializer=tensorflow.keras.initializers.GlorotNormal(seed=400)))
+# clf.add(tensorflow.keras.layers.Dense(1, activation='relu',
+#     kernel_initializer=tensorflow.keras.initializers.GlorotNormal(seed=42),
+#     bias_initializer=tensorflow.keras.initializers.GlorotNormal(seed=43),
+#     dtype='float64'))
+# opt = keras.optimizers.SGD(learning_rate=0.005)
+# clf.compile(optimizer=opt, loss='mse')
+# vec.sync()
+# 
+# start_dist_fit = time.time()
+# clf.fit(mat, vec, epochs=dist_niters, batch_size=128)
+# start_dist_pred = time.time()
+# pred = clf.predict(mat)
+# end_dist_pred = time.time()
+# pred.sync()
+# mse = vec.mse(pred)
 
 if pe() == 0:
-    print('PE ' + str(pe()) + '. Distributed training took ' + str(start_dist_pred - start_dist_fit) + ' s')
-    print('PE ' + str(pe()) + '. Distributed inference took ' + str(end_dist_pred - start_dist_pred) + ' s')
-    print('Distributed MSE = ' + str(mse))
-    print('PE=' + str(pe()) + ' sees predictions with M=' + str(pred.M()) + ', # iters=' + str(dist_niters))
-    for i in range(max_print_lines if pred.M() > max_print_lines else pred.M()):
-        print('  ' + str(pred.get(i, 0)))
-    if pred.M() > max_print_lines:
-        print('  ...')
-    for i in range(pred.M() - max_print_lines if pred.M() - max_print_lines >= 0 else 0, pred.M()):
-        print('  ' + str(pred.get(i, 0)))
-    print('')
-    print(clf.model._collected_trainable_weights)
-    # print(clf.model.__dict__)
+    # print('PE ' + str(pe()) + '. Distributed training took ' + str(start_dist_pred - start_dist_fit) + ' s')
+    # print('PE ' + str(pe()) + '. Distributed inference took ' + str(end_dist_pred - start_dist_pred) + ' s')
+    # print('Distributed MSE = ' + str(mse))
+    # print('PE=' + str(pe()) + ' sees predictions with M=' + str(pred.M()) + ', # iters=' + str(dist_niters))
+    # for i in range(max_print_lines if pred.M() > max_print_lines else pred.M()):
+    #     print('  ' + str(pred.get(i, 0)))
+    # if pred.M() > max_print_lines:
+    #     print('  ...')
+    # for i in range(pred.M() - max_print_lines if pred.M() - max_print_lines >= 0 else 0, pred.M()):
+    #     print('  ' + str(pred.get(i, 0)))
     # print('')
+    # print(clf.model._collected_trainable_weights)
+    # # print(clf.model.__dict__)
+    # # print('')
 
     gathered_lbls = vec.gather()
     gathered_features = mat.gather()
@@ -127,21 +131,21 @@ if pe() == 0:
 
     err = keras_model.evaluate(gathered_features, gathered_lbls)
 
-    print('Local predictions with keras and # iters=' + str(local_niters) + ':')
-    for i in range(max_print_lines if pred.M() > max_print_lines else pred.M()):
-        print('  ' + str(keras_pred[i, 0]))
-    if pred.M() > max_print_lines:
-        print('  ...')
-    for i in range(pred.M() - max_print_lines if pred.M() - max_print_lines >= 0 else 0, pred.M()):
-        print('  ' + str(keras_pred[i, 0]))
-    #print(err)
-    print('')
-    print(keras_model._collected_trainable_weights)
-    # print(keras_model.__dict__)
+    # print('Local predictions with keras and # iters=' + str(local_niters) + ':')
+    # for i in range(max_print_lines if pred.M() > max_print_lines else pred.M()):
+    #     print('  ' + str(keras_pred[i, 0]))
+    # if pred.M() > max_print_lines:
+    #     print('  ...')
+    # for i in range(pred.M() - max_print_lines if pred.M() - max_print_lines >= 0 else 0, pred.M()):
+    #     print('  ' + str(keras_pred[i, 0]))
+    # #print(err)
     # print('')
-    print('PE ' + str(pe()) + '. Distributed training took ' + str(start_dist_pred - start_dist_fit) + ' s')
+    # print(keras_model._collected_trainable_weights)
+    # # print(keras_model.__dict__)
+    # # print('')
+    # print('PE ' + str(pe()) + '. Distributed training took ' + str(start_dist_pred - start_dist_fit) + ' s')
     print('PE ' + str(pe()) + '. Local training took ' + str(start_local_pred - start_local_fit) + ' s')
-    print('PE ' + str(pe()) + '. Distributed inference took ' + str(end_dist_pred - start_dist_pred) + ' s')
+    # print('PE ' + str(pe()) + '. Distributed inference took ' + str(end_dist_pred - start_dist_pred) + ' s')
     print('PE ' + str(pe()) + '. Local inference took ' + str(end_local_pred - start_local_pred) + ' s')
     print('')
 

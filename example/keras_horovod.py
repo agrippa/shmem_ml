@@ -9,8 +9,10 @@ start_setup = time.time()
 
 hvd.init()
 
+learning_rate=0.01
+niters = 100
 batch_size = 128
-nthreads = 1
+nthreads = 2
 tf.config.threading.set_inter_op_parallelism_threads(nthreads)
 tf.config.threading.set_intra_op_parallelism_threads(nthreads)
 
@@ -37,7 +39,10 @@ for i in range(my_start_sample, my_end_sample):
 max_print_lines = 20
 if hvd.rank() == 0:
     print('Running in horovod job of ' + str(hvd.size()) + ' w/ ' +
-            str(nsamples) + ' samples')
+            str(nsamples) + ' samples, ' + str(nthreads) + ' threads per ' +
+            'rank, learning rate ' + str(learning_rate) + ', batch size ' +
+            str(batch_size) + ', ' + str(niters) + ' epochs')
+
     print('Labels:')
     for i in range(max_print_lines if len(vec) > max_print_lines else len(vec)):
         print('  ' + str(vec[i]))
@@ -69,7 +74,7 @@ clf.add(tf.keras.layers.Dense(1, activation='relu',
     kernel_initializer=tf.keras.initializers.GlorotNormal(seed=42),
     bias_initializer=tf.keras.initializers.GlorotNormal(seed=43),
     dtype='float64'))
-opt = keras.optimizers.SGD(learning_rate=0.005)
+opt = keras.optimizers.SGD(learning_rate=learning_rate)
 # opt = tf.optimizers.Adam(0.001 * hvd.size())
 
 # loss = tf.losses.SparseCategoricalCrossentropy()
@@ -103,13 +108,10 @@ def training_step(images, labels, first_batch):
 start_train = time.time()
 # Horovod: adjust number of steps based on number of GPUs.
 
-# niters = 100
-niters = 100
 for it in range(niters):
     start_iter = time.time()
     for i in range(0, n_my_samples, batch_size):
         loss_value = training_step(mat[i:i+batch_size, :], vec[i:i+batch_size], it == 0 and i == 0)
-    # loss_value = training_step(mat[:, :], vec[:], it == 0)
     elapsed_iter = time.time() - start_iter
     if hvd.rank() == 0:
         print('Epoch #%d\trank %d\t%f s\tLoss: %.6f' % (it, hvd.rank(), elapsed_iter, loss_value))
